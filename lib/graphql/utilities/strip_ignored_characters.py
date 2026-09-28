@@ -1,3 +1,5 @@
+"""Removal of insignificant characters"""
+
 from typing import Union, cast
 
 from ..language import Lexer, TokenKind
@@ -9,7 +11,7 @@ __all__ = ["strip_ignored_characters"]
 
 
 def strip_ignored_characters(source: Union[str, Source]) -> str:
-    """Strip characters that are ignored anyway.
+    '''Strip characters that are ignored anyway.
 
     Strips characters that are not significant to the validity or execution
     of a GraphQL document:
@@ -22,7 +24,7 @@ def strip_ignored_characters(source: Union[str, Source]) -> str:
         - BlockString indentation
 
     Note: It is required to have a delimiter character between neighboring
-    non-punctuator tokes and this function always uses single space as delimiter.
+    non-punctuator tokens and this function always uses single space as delimiter.
 
     It is guaranteed that both input and output documents if parsed would result
     in the exact same AST except for nodes location.
@@ -30,7 +32,6 @@ def strip_ignored_characters(source: Union[str, Source]) -> str:
     Warning: It is guaranteed that this function will always produce stable results.
     However, it's not guaranteed that it will stay the same between different
     releases due to bugfixes or changes in the GraphQL specification.
-    """ '''
 
     Query example::
 
@@ -63,6 +64,14 @@ def strip_ignored_characters(source: Union[str, Source]) -> str:
     Becomes::
 
         """Type description""" type Foo{"""Field description""" bar:String}
+
+    :param source: The GraphQL source text or source object.
+    :returns: A semantically equivalent GraphQL source string without ignored
+        characters.
+
+    >>> from graphql import strip_ignored_characters
+    >>> strip_ignored_characters('query Example { name }')
+    'query Example{name}'
     '''
     source = cast(Source, source) if is_source(source) else Source(cast(str, source))
 

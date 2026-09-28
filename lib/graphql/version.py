@@ -1,10 +1,12 @@
+"""GraphQL-core version number"""
+
 import re
 from typing import NamedTuple
 
 __all__ = ["version", "version_info", "version_js", "version_info_js"]
 
 
-version = "3.2.12"
+version = "3.2.13"
 
 version_js = "16.14.2"
 
