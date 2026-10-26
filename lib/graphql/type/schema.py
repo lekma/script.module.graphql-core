@@ -1,32 +1,33 @@
 """GraphQL schemas"""
 
+from __future__ import annotations
+
 from copy import copy, deepcopy
 from typing import (
+    TYPE_CHECKING,
     Any,
-    Collection,
-    Dict,
-    List,
     NamedTuple,
-    Optional,
-    Set,
-    Tuple,
-    Union,
     cast,
 )
 
-from ..error import GraphQLError
-from ..language import OperationType, ast
-from ..pyutils import inspect, is_collection, is_description
+if TYPE_CHECKING:
+    from collections.abc import Collection
+
+    from ..error import GraphQLError
+    from ..language import OperationType, ast
+
+from typing import TypeAlias, TypedDict, TypeGuard
+
+from ..pyutils import inspect
 from .definition import (
     GraphQLAbstractType,
-    GraphQLInputObjectType,
+    GraphQLCompositeType,
+    GraphQLField,
     GraphQLInputType,
     GraphQLInterfaceType,
     GraphQLNamedType,
     GraphQLObjectType,
     GraphQLType,
-    GraphQLUnionType,
-    GraphQLWrappingType,
     get_named_type,
     is_input_object_type,
     is_interface_type,
@@ -35,48 +36,47 @@ from .definition import (
     is_wrapping_type,
 )
 from .directives import GraphQLDirective, is_directive, specified_directives
-from .introspection import introspection_types
+from .introspection import (
+    SchemaMetaFieldDef,
+    TypeMetaFieldDef,
+    TypeNameMetaFieldDef,
+    introspection_types,
+)
 
-try:
-    from typing import TypedDict
-except ImportError:  # Python < 3.8
-    from typing_extensions import TypedDict
+__all__ = ["GraphQLSchema", "GraphQLSchemaKwargs", "assert_schema", "is_schema"]
 
-__all__ = ["GraphQLSchema", "GraphQLSchemaKwargs", "is_schema", "assert_schema"]
-
-
-TypeMap = Dict[str, GraphQLNamedType]
+TypeMap: TypeAlias = dict[str, GraphQLNamedType]
 
 
 class InterfaceImplementations(NamedTuple):
     """Objects and interfaces that implement an interface type."""
 
-    objects: List[GraphQLObjectType]
+    objects: list[GraphQLObjectType]
     """Object types that implement the interface."""
-    interfaces: List[GraphQLInterfaceType]
+    interfaces: list[GraphQLInterfaceType]
     """Interface types that implement the interface."""
 
 
 class GraphQLSchemaKwargs(TypedDict, total=False):
-    """Arguments used to construct a GraphQLSchema."""
+    """Arguments for GraphQL schemas"""
 
-    query: Optional[GraphQLObjectType]
+    query: GraphQLObjectType | None
     """Root object type for query operations."""
-    mutation: Optional[GraphQLObjectType]
+    mutation: GraphQLObjectType | None
     """Root object type for mutation operations."""
-    subscription: Optional[GraphQLObjectType]
+    subscription: GraphQLObjectType | None
     """Root object type for subscription operations."""
-    types: Optional[Tuple[GraphQLNamedType, ...]]
+    types: tuple[GraphQLNamedType, ...] | None
     """Named types that belong to this schema."""
-    directives: Tuple[GraphQLDirective, ...]
+    directives: tuple[GraphQLDirective, ...]
     """Directives available in this schema."""
-    description: Optional[str]
+    description: str | None
     """Human-readable description for this schema element, if provided."""
-    extensions: Dict[str, Any]
+    extensions: dict[str, Any]
     """Custom extension fields reserved for users."""
-    ast_node: Optional[ast.SchemaDefinitionNode]
+    ast_node: ast.SchemaDefinitionNode | None
     """AST node from which this schema element was built, if available."""
-    extension_ast_nodes: Tuple[ast.SchemaExtensionNode, ...]
+    extension_ast_nodes: tuple[ast.SchemaExtensionNode, ...]
     """AST extension nodes applied to this schema element."""
     assume_valid: bool
     """Whether the schema is assumed to be valid and will not be validated."""
@@ -235,102 +235,67 @@ class GraphQLSchema:
     {'owner': 'platform'}
     """
 
-    query_type: Optional[GraphQLObjectType]
+    query_type: GraphQLObjectType | None
     """The root object type for query operations, if this schema defines one."""
-    mutation_type: Optional[GraphQLObjectType]
+    mutation_type: GraphQLObjectType | None
     """The root object type for mutation operations, if this schema defines one."""
-    subscription_type: Optional[GraphQLObjectType]
+    subscription_type: GraphQLObjectType | None
     """The root object type for subscription operations, if defined."""
     type_map: TypeMap
     """All named types known to this schema, keyed by type name."""
-    directives: Tuple[GraphQLDirective, ...]
+    directives: tuple[GraphQLDirective, ...]
     """Directives available in this schema."""
-    description: Optional[str]
+    description: str | None
     """Human-readable description for this schema element, if provided."""
-    extensions: Dict[str, Any]
+    extensions: dict[str, Any]
     """Custom extension fields reserved for users."""
-    ast_node: Optional[ast.SchemaDefinitionNode]
+    ast_node: ast.SchemaDefinitionNode | None
     """AST node from which this schema element was built, if available."""
-    extension_ast_nodes: Tuple[ast.SchemaExtensionNode, ...]
+    extension_ast_nodes: tuple[ast.SchemaExtensionNode, ...]
     """AST extension nodes applied to this schema element."""
 
-    _implementations_map: Dict[str, InterfaceImplementations]
-    _sub_type_map: Dict[str, Set[str]]
-    _validation_errors: Optional[List[GraphQLError]]
+    assume_valid: bool
+    """Whether this schema instance skips validation checks."""
+
+    _implementations_map: dict[str, InterfaceImplementations]
+    _sub_type_map: dict[str, set[str]]
+    _validation_errors: list[GraphQLError] | None
 
     def __init__(
         self,
-        query: Optional[GraphQLObjectType] = None,
-        mutation: Optional[GraphQLObjectType] = None,
-        subscription: Optional[GraphQLObjectType] = None,
-        types: Optional[Collection[GraphQLNamedType]] = None,
-        directives: Optional[Collection[GraphQLDirective]] = None,
-        description: Optional[str] = None,
-        extensions: Optional[Dict[str, Any]] = None,
-        ast_node: Optional[ast.SchemaDefinitionNode] = None,
-        extension_ast_nodes: Optional[Collection[ast.SchemaExtensionNode]] = None,
+        query: GraphQLObjectType | None = None,
+        mutation: GraphQLObjectType | None = None,
+        subscription: GraphQLObjectType | None = None,
+        types: Collection[GraphQLNamedType] | None = None,
+        directives: Collection[GraphQLDirective] | None = None,
+        description: str | None = None,
+        extensions: dict[str, Any] | None = None,
+        ast_node: ast.SchemaDefinitionNode | None = None,
+        extension_ast_nodes: Collection[ast.SchemaExtensionNode] | None = None,
         assume_valid: bool = False,
     ) -> None:
-        # If this schema was built from a source known to be valid, then it may be
-        # marked with assume_valid to avoid an additional type system validation.
+        """Initialize GraphQL schema.
+
+        If this schema was built from a source known to be valid, then it may be marked
+        with ``assume_valid`` to avoid an additional type system validation.
+        """
+        self.assume_valid = assume_valid
+        # Used as a cache for validate_schema().
         self._validation_errors = [] if assume_valid else None
 
-        # Check for common mistakes during construction to produce clear and early
-        # error messages, but we leave the specific tests for the validation.
-        if query and not isinstance(query, GraphQLType):
-            raise TypeError("Expected query to be a GraphQL type.")
-        if mutation and not isinstance(mutation, GraphQLType):
-            raise TypeError("Expected mutation to be a GraphQL type.")
-        if subscription and not isinstance(subscription, GraphQLType):
-            raise TypeError("Expected subscription to be a GraphQL type.")
-        if types is None:
-            types = []
-        else:
-            if not is_collection(types) or not all(
-                isinstance(type_, GraphQLType) for type_ in types
-            ):
-                raise TypeError(
-                    "Schema types must be specified as a collection of GraphQL types."
-                )
-        if directives is not None:
-            # noinspection PyUnresolvedReferences
-            if not is_collection(directives):
-                raise TypeError("Schema directives must be a collection.")
-            if not isinstance(directives, tuple):
-                directives = tuple(directives)
-        if description is not None and not is_description(description):
-            raise TypeError("Schema description must be a string.")
-        if extensions is None:
-            extensions = {}
-        elif not isinstance(extensions, dict) or not all(
-            isinstance(key, str) for key in extensions
-        ):
-            raise TypeError("Schema extensions must be a dictionary with string keys.")
-        if ast_node and not isinstance(ast_node, ast.SchemaDefinitionNode):
-            raise TypeError("Schema AST node must be a SchemaDefinitionNode.")
-        if extension_ast_nodes:
-            if not is_collection(extension_ast_nodes) or not all(
-                isinstance(node, ast.SchemaExtensionNode)
-                for node in extension_ast_nodes
-            ):
-                raise TypeError(
-                    "Schema extension AST nodes must be specified"
-                    " as a collection of SchemaExtensionNode instances."
-                )
-            if not isinstance(extension_ast_nodes, tuple):
-                extension_ast_nodes = tuple(extension_ast_nodes)
-        else:
-            extension_ast_nodes = ()
-
         self.description = description
-        self.extensions = extensions
+        self.extensions = extensions or {}
         self.ast_node = ast_node
-        self.extension_ast_nodes = extension_ast_nodes
+        self.extension_ast_nodes = (
+            tuple(extension_ast_nodes) if extension_ast_nodes else ()
+        )
         self.query_type = query
         self.mutation_type = mutation
         self.subscription_type = subscription
         # Provide specified directives (e.g. @include and @skip) by default
-        self.directives = specified_directives if directives is None else directives
+        self.directives = (
+            specified_directives if directives is None else tuple(directives)
+        )
 
         # To preserve order of user-provided types, we first add them to the set
         # of "collected" types, so `collect_referenced_types` ignores them.
@@ -368,7 +333,7 @@ class GraphQLSchema:
         self._sub_type_map = {}
 
         # Keep track of all implementations by interface name.
-        implementations_map: Dict[str, InterfaceImplementations] = {}
+        implementations_map: dict[str, InterfaceImplementations] = {}
         self._implementations_map = implementations_map
 
         for named_type in all_referenced_types:
@@ -377,24 +342,24 @@ class GraphQLSchema:
 
             type_name = getattr(named_type, "name", None)
             if not type_name:
-                raise TypeError(
+                msg = (
                     "One of the provided types for building the Schema"
-                    " is missing a name.",
+                    " is missing a name."
                 )
+                raise TypeError(msg)
             if type_name in type_map:
-                raise TypeError(
+                msg = (
                     "Schema must contain uniquely named types"
                     f" but contains multiple types named '{type_name}'."
                 )
+                raise TypeError(msg)
 
             type_map[type_name] = named_type
 
             if is_interface_type(named_type):
-                named_type = cast(GraphQLInterfaceType, named_type)
                 # Store implementations by interface.
                 for iface in named_type.interfaces:
                     if is_interface_type(iface):
-                        iface = cast(GraphQLInterfaceType, iface)
                         if iface.name in implementations_map:
                             implementations = implementations_map[iface.name]
                         else:
@@ -404,11 +369,9 @@ class GraphQLSchema:
 
                         implementations.interfaces.append(named_type)
             elif is_object_type(named_type):
-                named_type = cast(GraphQLObjectType, named_type)
                 # Store implementations by objects.
                 for iface in named_type.interfaces:
                     if is_interface_type(iface):
-                        iface = cast(GraphQLInterfaceType, iface)
                         if iface.name in implementations_map:
                             implementations = implementations_map[iface.name]
                         else:
@@ -449,13 +412,13 @@ class GraphQLSchema:
             extensions=self.extensions,
             ast_node=self.ast_node,
             extension_ast_nodes=self.extension_ast_nodes,
-            assume_valid=self._validation_errors is not None,
+            assume_valid=self.assume_valid,
         )
 
-    def __copy__(self) -> "GraphQLSchema":  # pragma: no cover
+    def __copy__(self) -> GraphQLSchema:  # pragma: no cover
         return self.__class__(**self.to_kwargs())
 
-    def __deepcopy__(self, memo_: Dict) -> "GraphQLSchema":
+    def __deepcopy__(self, memo_: dict) -> GraphQLSchema:
         from ..type import (
             is_introspection_type,
             is_specified_directive,
@@ -477,11 +440,12 @@ class GraphQLSchema:
         for directive in directives:
             remap_directive(directive, type_map)
         return self.__class__(
-            self.query_type and cast(GraphQLObjectType, type_map[self.query_type.name]),
+            self.query_type
+            and cast("GraphQLObjectType", type_map[self.query_type.name]),
             self.mutation_type
-            and cast(GraphQLObjectType, type_map[self.mutation_type.name]),
+            and cast("GraphQLObjectType", type_map[self.mutation_type.name]),
             self.subscription_type
-            and cast(GraphQLObjectType, type_map[self.subscription_type.name]),
+            and cast("GraphQLObjectType", type_map[self.subscription_type.name]),
             types,
             directives,
             self.description,
@@ -491,7 +455,7 @@ class GraphQLSchema:
             assume_valid=True,
         )
 
-    def get_root_type(self, operation: OperationType) -> Optional[GraphQLObjectType]:
+    def get_root_type(self, operation: OperationType) -> GraphQLObjectType | None:
         """Get the root object type for the requested operation kind.
 
         :param operation: the operation kind to resolve
@@ -517,7 +481,7 @@ class GraphQLSchema:
         """
         return getattr(self, f"{operation.value}_type")
 
-    def get_type(self, name: str) -> Optional[GraphQLNamedType]:
+    def get_type(self, name: str) -> GraphQLNamedType | None:
         """Get the named type with the provided name.
 
         :param name: the GraphQL name to look up
@@ -542,7 +506,7 @@ class GraphQLSchema:
 
     def get_possible_types(
         self, abstract_type: GraphQLAbstractType
-    ) -> List[GraphQLObjectType]:
+    ) -> list[GraphQLObjectType]:
         """Get list of all possible concrete types for given abstract type.
 
         :param abstract_type: the interface or union type to inspect
@@ -579,10 +543,10 @@ class GraphQLSchema:
         ['User', 'Organization']
         """
         return (
-            cast(GraphQLUnionType, abstract_type).types
+            abstract_type.types
             if is_union_type(abstract_type)
             else self.get_implementations(
-                cast(GraphQLInterfaceType, abstract_type)
+                cast("GraphQLInterfaceType", abstract_type)
             ).objects
         )
 
@@ -671,11 +635,11 @@ class GraphQLSchema:
             types = set()
             add = types.add
             if is_union_type(abstract_type):
-                for type_ in cast(GraphQLUnionType, abstract_type).types:
+                for type_ in abstract_type.types:
                     add(type_.name)
             else:
                 implementations = self.get_implementations(
-                    cast(GraphQLInterfaceType, abstract_type)
+                    cast("GraphQLInterfaceType", abstract_type)
                 )
                 for type_ in implementations.objects:
                     add(type_.name)
@@ -684,7 +648,7 @@ class GraphQLSchema:
             self._sub_type_map[abstract_type.name] = types
         return maybe_sub_type.name in types
 
-    def get_directive(self, name: str) -> Optional[GraphQLDirective]:
+    def get_directive(self, name: str) -> GraphQLDirective | None:
         """Get the directive with the provided name.
 
         :param name: the GraphQL name to look up
@@ -710,8 +674,55 @@ class GraphQLSchema:
                 return directive
         return None
 
+    def get_field(
+        self, parent_type: GraphQLCompositeType, field_name: str
+    ) -> GraphQLField | None:
+        """Get field of a given type with the given name.
+
+        This method looks up the field on the given type definition.
+        It has special casing for the three introspection fields, ``__schema``,
+        ``__type`` and ``__typename``.
+
+        ``__typename`` is special because it can always be queried as a field, even
+        in situations where no other fields are allowed, like on a Union.
+
+        ``__schema`` and ``__type`` could get automatically added to the query type,
+        but that would require mutating type definitions, which would cause issues.
+
+        :param parent_type: composite type to look up the field on
+        :param field_name: field name to look up
+        :returns: the field definition, including supported introspection fields
+
+        >>> from graphql import build_schema
+        >>> schema = build_schema('''
+        ...     type Query {
+        ...       greeting: String
+        ...     }
+        ... ''')
+        >>> query_type = schema.query_type
+        >>> schema.get_field(query_type, 'greeting').type
+        <GraphQLScalarType 'String'>
+        >>> str(schema.get_field(query_type, '__typename').type)
+        'String!'
+        >>> schema.get_field(query_type, 'missing') is None
+        True
+        """
+        if field_name == "__schema":
+            return SchemaMetaFieldDef if self.query_type is parent_type else None
+        if field_name == "__type":
+            return TypeMetaFieldDef if self.query_type is parent_type else None
+        if field_name == "__typename":
+            return TypeNameMetaFieldDef
+
+        # this function is part of a "hot" path inside executor and to assume presence
+        # of 'fields' is faster than to use `not is_union_type`
+        try:
+            return parent_type.fields[field_name]  # type: ignore
+        except (AttributeError, KeyError):
+            return None
+
     @property
-    def validation_errors(self) -> Optional[List[GraphQLError]]:
+    def validation_errors(self) -> list[GraphQLError] | None:
         """Cached schema validation errors, if validation has already run.
 
         :meta private:
@@ -719,12 +730,12 @@ class GraphQLSchema:
         return self._validation_errors
 
 
-class TypeSet(Dict[GraphQLNamedType, None]):
+class TypeSet(dict[GraphQLNamedType, None]):
     """An ordered set of types that can be collected starting from initial types."""
 
     @classmethod
-    def with_initial_types(cls, types: Collection[GraphQLType]) -> "TypeSet":
-        return cast(TypeSet, super().fromkeys(types))
+    def with_initial_types(cls, types: Collection[GraphQLType]) -> TypeSet:
+        return cast("TypeSet", super().fromkeys(types))
 
     def collect_referenced_types(self, type_: GraphQLType) -> None:
         """Recursive function supplementing the type starting from an initial type."""
@@ -737,13 +748,9 @@ class TypeSet(Dict[GraphQLNamedType, None]):
 
         collect_referenced_types = self.collect_referenced_types
         if is_union_type(named_type):
-            named_type = cast(GraphQLUnionType, named_type)
             for member_type in named_type.types:
                 collect_referenced_types(member_type)
         elif is_object_type(named_type) or is_interface_type(named_type):
-            named_type = cast(
-                Union[GraphQLObjectType, GraphQLInterfaceType], named_type
-            )
             for interface_type in named_type.interfaces:
                 collect_referenced_types(interface_type)
 
@@ -752,12 +759,11 @@ class TypeSet(Dict[GraphQLNamedType, None]):
                 for arg in field.args.values():
                     collect_referenced_types(arg.type)
         elif is_input_object_type(named_type):
-            named_type = cast(GraphQLInputObjectType, named_type)
             for field in named_type.fields.values():
                 collect_referenced_types(field.type)
 
 
-def is_schema(schema: Any) -> bool:
+def is_schema(schema: Any) -> TypeGuard[GraphQLSchema]:
     """Test if the given value is a GraphQL schema.
 
     :param schema: the value to inspect
@@ -797,47 +803,44 @@ def assert_schema(schema: Any) -> GraphQLSchema:
     TypeError: Expected String to be a GraphQL schema.
     """
     if not is_schema(schema):
-        raise TypeError(f"Expected {inspect(schema)} to be a GraphQL schema.")
-    return cast(GraphQLSchema, schema)
+        msg = f"Expected {inspect(schema)} to be a GraphQL schema."
+        raise TypeError(msg)
+    return schema
 
 
 def remapped_type(type_: GraphQLType, type_map: TypeMap) -> GraphQLType:
     """Get a copy of the given type that uses this type map."""
     if is_wrapping_type(type_):
-        type_ = cast(GraphQLWrappingType, type_)
         return type_.__class__(remapped_type(type_.of_type, type_map))
-    type_ = cast(GraphQLNamedType, type_)
+    type_ = cast("GraphQLNamedType", type_)
     return type_map.get(type_.name, type_)
 
 
 def remap_named_type(type_: GraphQLNamedType, type_map: TypeMap) -> None:
     """Change all references in the given named type to use this type map."""
     if is_object_type(type_) or is_interface_type(type_):
-        type_ = cast(Union[GraphQLObjectType, GraphQLInterfaceType], type_)
         type_.interfaces = [
             type_map.get(interface_type.name, interface_type)
             for interface_type in type_.interfaces
         ]
         fields = type_.fields
         for field_name, field in fields.items():
-            field = copy(field)
+            field = copy(field)  # noqa: PLW2901
             field.type = remapped_type(field.type, type_map)
             args = field.args
             for arg_name, arg in args.items():
-                arg = copy(arg)
+                arg = copy(arg)  # noqa: PLW2901
                 arg.type = remapped_type(arg.type, type_map)
                 args[arg_name] = arg
             fields[field_name] = field
     elif is_union_type(type_):
-        type_ = cast(GraphQLUnionType, type_)
         type_.types = [
             type_map.get(member_type.name, member_type) for member_type in type_.types
         ]
     elif is_input_object_type(type_):
-        type_ = cast(GraphQLInputObjectType, type_)
         fields = type_.fields
         for field_name, field in fields.items():
-            field = copy(field)
+            field = copy(field)  # noqa: PLW2901
             field.type = remapped_type(field.type, type_map)
             fields[field_name] = field
 
@@ -847,5 +850,5 @@ def remap_directive(directive: GraphQLDirective, type_map: TypeMap) -> None:
     args = directive.args
     for arg_name, arg in args.items():
         arg = copy(arg)  # noqa: PLW2901
-        arg.type = cast(GraphQLInputType, remapped_type(arg.type, type_map))
+        arg.type = cast("GraphQLInputType", remapped_type(arg.type, type_map))
         args[arg_name] = arg

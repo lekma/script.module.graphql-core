@@ -1,9 +1,11 @@
 """Unique directive names rule"""
 
-from typing import Any, Dict
+from __future__ import annotations
+
+from typing import Any
 
 from ...error import GraphQLError
-from ...language import DirectiveDefinitionNode, NameNode, VisitorAction, SKIP
+from ...language import SKIP, DirectiveDefinitionNode, NameNode, VisitorAction
 from . import SDLValidationContext, SDLValidationRule
 
 __all__ = ["UniqueDirectiveNamesRule"]
@@ -33,9 +35,9 @@ class UniqueDirectiveNamesRule(SDLValidationRule):
     >>> schema = build_schema(sdl)
     """
 
-    def __init__(self, context: SDLValidationContext):
+    def __init__(self, context: SDLValidationContext) -> None:
         super().__init__(context)
-        self.known_directive_names: Dict[str, NameNode] = {}
+        self.known_directive_names: dict[str, NameNode] = {}
         self.schema = context.schema
 
     def enter_directive_definition(

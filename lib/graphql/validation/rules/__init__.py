@@ -35,7 +35,7 @@ class ASTValidationRule(Visitor):
     context: ASTValidationContext
     """The validation context used while checking the document."""
 
-    def __init__(self, context: ASTValidationContext):
+    def __init__(self, context: ASTValidationContext) -> None:
         super().__init__()
         self.context = context
 

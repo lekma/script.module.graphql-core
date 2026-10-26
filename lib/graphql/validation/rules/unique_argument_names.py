@@ -1,12 +1,18 @@
 """Unique argument names rule"""
 
+from __future__ import annotations
+
 from operator import attrgetter
-from typing import Any, Collection
+from typing import TYPE_CHECKING, Any
 
 from ...error import GraphQLError
-from ...language import ArgumentNode, DirectiveNode, FieldNode
 from ...pyutils import group_by
 from . import ASTValidationRule
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
+
+    from ...language import ArgumentNode, DirectiveNode, FieldNode
 
 __all__ = ["UniqueArgumentNamesRule"]
 
@@ -40,19 +46,21 @@ class UniqueArgumentNamesRule(ASTValidationRule):
         """
         self.check_arg_uniqueness(node.arguments)
 
-    def enter_directive(self, node: DirectiveNode, *args: Any) -> None:
+    def enter_directive(self, node: DirectiveNode, *_args: Any) -> None:
         """Called when entering a directive node.
 
         :meta private:
         """
         self.check_arg_uniqueness(node.arguments)
 
-    def check_arg_uniqueness(self, argument_nodes: Collection[ArgumentNode]) -> None:
+    def check_arg_uniqueness(
+        self, argument_nodes: Collection[ArgumentNode] | None
+    ) -> None:
         """Report arguments with the same name.
 
         :meta private:
         """
-        seen_args = group_by(argument_nodes, attrgetter("name.value"))
+        seen_args = group_by(argument_nodes or (), attrgetter("name.value"))
 
         for arg_name, arg_nodes in seen_args.items():
             if len(arg_nodes) > 1:

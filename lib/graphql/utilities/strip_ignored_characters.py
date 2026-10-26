@@ -1,16 +1,18 @@
 """Removal of insignificant characters"""
 
-from typing import Union, cast
+from __future__ import annotations
+
+from typing import cast
 
 from ..language import Lexer, TokenKind
-from ..language.source import Source, is_source
 from ..language.block_string import print_block_string
 from ..language.lexer import is_punctuator_token_kind
+from ..language.source import Source, is_source
 
 __all__ = ["strip_ignored_characters"]
 
 
-def strip_ignored_characters(source: Union[str, Source]) -> str:
+def strip_ignored_characters(source: str | Source) -> str:
     '''Strip characters that are ignored anyway.
 
     Strips characters that are not significant to the validity or execution
@@ -73,7 +75,8 @@ def strip_ignored_characters(source: Union[str, Source]) -> str:
     >>> strip_ignored_characters('query Example { name }')
     'query Example{name}'
     '''
-    source = cast(Source, source) if is_source(source) else Source(cast(str, source))
+    if not is_source(source):
+        source = Source(cast("str", source))
 
     body = source.body
     lexer = Lexer(source)

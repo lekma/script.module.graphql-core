@@ -1,16 +1,23 @@
 """Predicates for GraphQL nodes"""
 
+from __future__ import annotations
+
+from typing import TypeGuard
+
 from .ast import (
     ArgumentCoordinateNode,
+    DefinitionNode,
     DirectiveArgumentCoordinateNode,
     DirectiveCoordinateNode,
-    MemberCoordinateNode,
-    Node,
-    DefinitionNode,
     DirectiveExtensionNode,
     ExecutableDefinitionNode,
     ListValueNode,
+    MemberCoordinateNode,
+    Node,
     ObjectValueNode,
+    OperationDefinitionNode,
+    OperationType,
+    SchemaCoordinateNode,
     SchemaExtensionNode,
     SelectionNode,
     TypeCoordinateNode,
@@ -23,21 +30,22 @@ from .ast import (
 )
 
 __all__ = [
+    "is_const_value_node",
     "is_definition_node",
     "is_executable_definition_node",
+    "is_schema_coordinate_node",
     "is_selection_node",
-    "is_value_node",
-    "is_const_value_node",
+    "is_subscription_operation_definition_node",
+    "is_type_definition_node",
+    "is_type_extension_node",
     "is_type_node",
     "is_type_system_definition_node",
-    "is_type_definition_node",
     "is_type_system_extension_node",
-    "is_type_extension_node",
-    "is_schema_coordinate_node",
+    "is_value_node",
 ]
 
 
-def is_definition_node(node: Node) -> bool:
+def is_definition_node(node: Node) -> TypeGuard[DefinitionNode]:
     """Check whether the given node represents a definition.
 
     :param node: the AST node to test
@@ -53,7 +61,7 @@ def is_definition_node(node: Node) -> bool:
     return isinstance(node, DefinitionNode)
 
 
-def is_executable_definition_node(node: Node) -> bool:
+def is_executable_definition_node(node: Node) -> TypeGuard[ExecutableDefinitionNode]:
     """Check whether the given node represents an executable definition.
 
     :param node: the AST node to test
@@ -70,7 +78,28 @@ def is_executable_definition_node(node: Node) -> bool:
     return isinstance(node, ExecutableDefinitionNode)
 
 
-def is_selection_node(node: Node) -> bool:
+def is_subscription_operation_definition_node(node: OperationDefinitionNode) -> bool:
+    """Check whether the given node represents a subscription operation.
+
+    Useful anywhere that must distinguish subscription operations from
+    queries and mutations, such as the subscription execution pipeline
+    which routes events through a different code path.
+
+    :param node: operation definition node to test
+    :returns: whether the operation definition is a subscription
+
+    >>> from graphql import parse, is_subscription_operation_definition_node
+    >>> subscription = parse('subscription { greeting }').definitions[0]
+    >>> query = parse('{ greeting }').definitions[0]
+    >>> is_subscription_operation_definition_node(subscription)
+    True
+    >>> is_subscription_operation_definition_node(query)
+    False
+    """
+    return node.operation == OperationType.SUBSCRIPTION
+
+
+def is_selection_node(node: Node) -> TypeGuard[SelectionNode]:
     """Check whether the given node represents a selection.
 
     :param node: the AST node to test
@@ -87,7 +116,7 @@ def is_selection_node(node: Node) -> bool:
     return isinstance(node, SelectionNode)
 
 
-def is_value_node(node: Node) -> bool:
+def is_value_node(node: Node) -> TypeGuard[ValueNode]:
     """Check whether the given node represents a value.
 
     :param node: the AST node to test
@@ -104,7 +133,7 @@ def is_value_node(node: Node) -> bool:
     return isinstance(node, ValueNode)
 
 
-def is_const_value_node(node: Node) -> bool:
+def is_const_value_node(node: Node) -> TypeGuard[ValueNode]:
     """Check whether the given node represents a constant value.
 
     :param node: the AST node to test
@@ -121,15 +150,13 @@ def is_const_value_node(node: Node) -> bool:
     return is_value_node(node) and (
         any(is_const_value_node(value) for value in node.values)
         if isinstance(node, ListValueNode)
-        else (
-            any(is_const_value_node(field.value) for field in node.fields)
-            if isinstance(node, ObjectValueNode)
-            else not isinstance(node, VariableNode)
-        )
+        else any(is_const_value_node(field.value) for field in node.fields)
+        if isinstance(node, ObjectValueNode)
+        else not isinstance(node, VariableNode)
     )
 
 
-def is_type_node(node: Node) -> bool:
+def is_type_node(node: Node) -> TypeGuard[TypeNode]:
     """Check whether the given node represents a type.
 
     :param node: the AST node to test
@@ -146,7 +173,7 @@ def is_type_node(node: Node) -> bool:
     return isinstance(node, TypeNode)
 
 
-def is_type_system_definition_node(node: Node) -> bool:
+def is_type_system_definition_node(node: Node) -> TypeGuard[TypeSystemDefinitionNode]:
     """Check whether the given node represents a type system definition.
 
     :param node: the AST node to test
@@ -163,7 +190,7 @@ def is_type_system_definition_node(node: Node) -> bool:
     return isinstance(node, TypeSystemDefinitionNode)
 
 
-def is_type_definition_node(node: Node) -> bool:
+def is_type_definition_node(node: Node) -> TypeGuard[TypeDefinitionNode]:
     """Check whether the given node represents a type definition.
 
     :param node: the AST node to test
@@ -180,7 +207,9 @@ def is_type_definition_node(node: Node) -> bool:
     return isinstance(node, TypeDefinitionNode)
 
 
-def is_type_system_extension_node(node: Node) -> bool:
+def is_type_system_extension_node(
+    node: Node,
+) -> TypeGuard[SchemaExtensionNode | DirectiveExtensionNode | TypeExtensionNode]:
     """Check whether the given node represents a type system extension.
 
     :param node: the AST node to test
@@ -199,7 +228,7 @@ def is_type_system_extension_node(node: Node) -> bool:
     )
 
 
-def is_type_extension_node(node: Node) -> bool:
+def is_type_extension_node(node: Node) -> TypeGuard[TypeExtensionNode]:
     """Check whether the given node represents a type extension.
 
     :param node: the AST node to test
@@ -216,7 +245,7 @@ def is_type_extension_node(node: Node) -> bool:
     return isinstance(node, TypeExtensionNode)
 
 
-def is_schema_coordinate_node(node: Node) -> bool:
+def is_schema_coordinate_node(node: Node) -> TypeGuard[SchemaCoordinateNode]:
     """Check whether the given node represents a schema coordinate.
 
     :param node: the AST node to test

@@ -1,9 +1,12 @@
 """Executable definitions rule"""
 
-from typing import Any, Union, cast
+from __future__ import annotations
+
+from typing import Any, cast
 
 from ...error import GraphQLError
 from ...language import (
+    SKIP,
     DirectiveDefinitionNode,
     DocumentNode,
     ExecutableDefinitionNode,
@@ -11,7 +14,6 @@ from ...language import (
     SchemaExtensionNode,
     TypeDefinitionNode,
     VisitorAction,
-    SKIP,
 )
 from . import ASTValidationRule
 
@@ -54,7 +56,7 @@ class ExecutableDefinitionsRule(ASTValidationRule):
                     )
                     else "'{}'".format(
                         cast(
-                            Union[DirectiveDefinitionNode, TypeDefinitionNode],
+                            "DirectiveDefinitionNode | TypeDefinitionNode",
                             definition,
                         ).name.value
                     )

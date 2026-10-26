@@ -1,59 +1,66 @@
 """GraphQL directives"""
 
-from typing import Any, Collection, Dict, Optional, Tuple, cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, TypedDict, TypeGuard, cast
 
 from ..language import DirectiveLocation, ast
-from ..pyutils import inspect, is_collection, is_description
+from ..pyutils import inspect
 from .assert_name import assert_name
-from .definition import GraphQLArgument, GraphQLInputType, GraphQLNonNull, is_input_type
-from .scalars import GraphQLBoolean, GraphQLString
+from .definition import (
+    GraphQLArgument,
+    GraphQLDefaultInput,
+    GraphQLInputType,
+    GraphQLNonNull,
+)
+from .scalars import GraphQLBoolean, GraphQLInt, GraphQLString
 
-try:
-    from typing import TypedDict
-except ImportError:  # Python < 3.8
-    from typing_extensions import TypedDict
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 __all__ = [
-    "is_directive",
-    "assert_directive",
-    "is_specified_directive",
-    "specified_directives",
+    "DEFAULT_DEPRECATION_REASON",
+    "DirectiveLocation",
+    "GraphQLDeferDirective",
+    "GraphQLDeprecatedDirective",
     "GraphQLDirective",
     "GraphQLDirectiveKwargs",
     "GraphQLIncludeDirective",
-    "GraphQLSkipDirective",
-    "GraphQLDeprecatedDirective",
-    "GraphQLSpecifiedByDirective",
     "GraphQLOneOfDirective",
-    "DirectiveLocation",
-    "DEFAULT_DEPRECATION_REASON",
+    "GraphQLSkipDirective",
+    "GraphQLSpecifiedByDirective",
+    "GraphQLStreamDirective",
+    "assert_directive",
+    "is_directive",
+    "is_specified_directive",
+    "specified_directives",
 ]
 
 
 class GraphQLDirectiveKwargs(TypedDict, total=False):
-    """Arguments used to construct a GraphQLDirective."""
+    """Arguments for GraphQL directives"""
 
     name: str
     """The GraphQL name for this schema element."""
-    locations: Tuple[DirectiveLocation, ...]
+    locations: tuple[DirectiveLocation, ...]
     """Locations where this directive may be applied."""
-    args: Dict[str, GraphQLArgument]
+    args: dict[str, GraphQLArgument]
     """Arguments accepted by this directive."""
     is_repeatable: bool
     """Whether this directive may appear more than once at the same location."""
-    deprecation_reason: Optional[str]
+    deprecation_reason: str | None
     """Reason this element is deprecated, if one was provided."""
-    description: Optional[str]
+    description: str | None
     """Human-readable description for this schema element, if provided."""
-    extensions: Dict[str, Any]
+    extensions: dict[str, Any]
     """Custom extension fields reserved for users."""
-    ast_node: Optional[ast.DirectiveDefinitionNode]
+    ast_node: ast.DirectiveDefinitionNode | None
     """AST node from which this schema element was built, if available."""
-    extension_ast_nodes: Tuple[ast.DirectiveExtensionNode, ...]
+    extension_ast_nodes: tuple[ast.DirectiveExtensionNode, ...]
     """AST extension nodes applied to this schema element."""
 
 
-class GraphQLDirective:
+class GraphQLDirective:  # noqa: PLW1641
     """GraphQL Directive
 
     Directives are used by the GraphQL runtime as a way of modifying execution behavior.
@@ -76,14 +83,18 @@ class GraphQLDirective:
     ...     DirectiveLocation,
     ...     GraphQLArgument,
     ...     GraphQLBoolean,
+    ...     GraphQLDefaultInput,
     ...     GraphQLDirective,
     ...     GraphQLInt,
     ...     GraphQLNonNull,
     ...     parse,
     ... )
-    >>> document = parse('''
+    >>> document = parse(
+    ...     '''
     ...     directive @cacheControl(maxAge: Int) repeatable on FIELD_DEFINITION
-    ... ''')
+    ...     extend directive @cacheControl @tag
+    ...     ''',
+    ... )
     >>> definition = document.definitions[0]
     >>> cache_control = GraphQLDirective(
     ...     name='cacheControl',
@@ -93,7 +104,7 @@ class GraphQLDirective:
     ...         'inheritMaxAge': GraphQLArgument(
     ...             GraphQLNonNull(GraphQLBoolean),
     ...             description='Inherit the parent cache hint.',
-    ...             default_value=False,
+    ...             default=GraphQLDefaultInput(False),
     ...             deprecation_reason='Use maxAge instead.',
     ...             extensions={'scope': 'cache'},
     ...         ),
@@ -105,6 +116,7 @@ class GraphQLDirective:
     ...     deprecation_reason='Use @cache instead.',
     ...     extensions={'scope': 'cache'},
     ...     ast_node=definition,
+    ...     extension_ast_nodes=[document.definitions[1]],
     ... )
     >>> cache_control.name
     'cacheControl'
@@ -112,7 +124,7 @@ class GraphQLDirective:
     'Controls HTTP cache hints for a field.'
     >>> list(cache_control.args)
     ['inheritMaxAge', 'maxAge']
-    >>> cache_control.args['inheritMaxAge'].default_value
+    >>> cache_control.args['inheritMaxAge'].default.value
     False
     >>> cache_control.is_repeatable
     True
@@ -122,108 +134,69 @@ class GraphQLDirective:
 
     name: str
     """The GraphQL name for this schema element."""
-    locations: Tuple[DirectiveLocation, ...]
+    locations: tuple[DirectiveLocation, ...]
     """Locations where this directive may be applied."""
     is_repeatable: bool
     """Whether this directive may appear more than once at the same location."""
-    args: Dict[str, GraphQLArgument]
+    args: dict[str, GraphQLArgument]
     """Arguments accepted by this directive."""
-    deprecation_reason: Optional[str]
+    deprecation_reason: str | None
     """Reason this element is deprecated, if one was provided."""
-    description: Optional[str]
+    description: str | None
     """Human-readable description for this schema element, if provided."""
-    extensions: Dict[str, Any]
+    extensions: dict[str, Any]
     """Custom extension fields reserved for users."""
-    ast_node: Optional[ast.DirectiveDefinitionNode]
+    ast_node: ast.DirectiveDefinitionNode | None
     """AST node from which this schema element was built, if available."""
-    extension_ast_nodes: Tuple[ast.DirectiveExtensionNode, ...]
+    extension_ast_nodes: tuple[ast.DirectiveExtensionNode, ...]
     """AST extension nodes applied to this schema element."""
 
     def __init__(
         self,
         name: str,
         locations: Collection[DirectiveLocation],
-        args: Optional[Dict[str, GraphQLArgument]] = None,
+        args: dict[str, GraphQLArgument] | None = None,
         is_repeatable: bool = False,
-        deprecation_reason: Optional[str] = None,
-        description: Optional[str] = None,
-        extensions: Optional[Dict[str, Any]] = None,
-        ast_node: Optional[ast.DirectiveDefinitionNode] = None,
-        extension_ast_nodes: Optional[Collection[ast.DirectiveExtensionNode]] = None,
+        deprecation_reason: str | None = None,
+        description: str | None = None,
+        extensions: dict[str, Any] | None = None,
+        ast_node: ast.DirectiveDefinitionNode | None = None,
+        extension_ast_nodes: Collection[ast.DirectiveExtensionNode] | None = None,
     ) -> None:
         assert_name(name)
         try:
             locations = tuple(
-                (
-                    value
-                    if isinstance(value, DirectiveLocation)
-                    else DirectiveLocation[cast(str, value)]
-                )
+                value
+                if isinstance(value, DirectiveLocation)
+                else DirectiveLocation[cast("str", value)]
                 for value in locations
             )
-        except (KeyError, TypeError):
-            raise TypeError(
+        except (KeyError, TypeError) as error:
+            msg = (
                 f"{name} locations must be specified"
                 " as a collection of DirectiveLocation enum values."
             )
-        if args is None:
-            args = {}
-        elif not isinstance(args, dict) or not all(
-            isinstance(key, str) for key in args
-        ):
-            raise TypeError(f"{name} args must be a dict with argument names as keys.")
-        elif not all(
-            isinstance(value, GraphQLArgument) or is_input_type(value)
-            for value in args.values()
-        ):
-            raise TypeError(
-                f"{name} args must be GraphQLArgument or input type objects."
-            )
-        else:
+            raise TypeError(msg) from error
+        if args:
             args = {
-                assert_name(name): (
-                    value
-                    if isinstance(value, GraphQLArgument)
-                    else GraphQLArgument(cast(GraphQLInputType, value))
-                )
+                assert_name(name): value
+                if isinstance(value, GraphQLArgument)
+                else GraphQLArgument(cast("GraphQLInputType", value))
                 for name, value in args.items()
             }
-        if not isinstance(is_repeatable, bool):
-            raise TypeError(f"{name} is_repeatable flag must be True or False.")
-        if deprecation_reason is not None and not is_description(deprecation_reason):
-            raise TypeError(f"{name} deprecation reason must be a string.")
-        if ast_node and not isinstance(ast_node, ast.DirectiveDefinitionNode):
-            raise TypeError(f"{name} AST node must be a DirectiveDefinitionNode.")
-        if description is not None and not is_description(description):
-            raise TypeError(f"{name} description must be a string.")
-        if extensions is None:
-            extensions = {}
-        elif not isinstance(extensions, dict) or not all(
-            isinstance(key, str) for key in extensions
-        ):
-            raise TypeError(f"{name} extensions must be a dictionary with string keys.")
-        if extension_ast_nodes:
-            if not is_collection(extension_ast_nodes) or not all(
-                isinstance(node, ast.DirectiveExtensionNode)
-                for node in extension_ast_nodes
-            ):
-                raise TypeError(
-                    f"{name} extension AST nodes must be specified"
-                    " as a collection of DirectiveExtensionNode instances."
-                )
-            if not isinstance(extension_ast_nodes, tuple):
-                extension_ast_nodes = tuple(extension_ast_nodes)
         else:
-            extension_ast_nodes = ()
+            args = {}
         self.name = name
         self.locations = locations
         self.args = args
         self.is_repeatable = is_repeatable
         self.deprecation_reason = deprecation_reason
         self.description = description
-        self.extensions = extensions
+        self.extensions = extensions or {}
         self.ast_node = ast_node
-        self.extension_ast_nodes = extension_ast_nodes
+        self.extension_ast_nodes = (
+            tuple(extension_ast_nodes) if extension_ast_nodes else ()
+        )
 
     def __str__(self) -> str:
         """Get the schema coordinate identifying this directive.
@@ -238,7 +211,7 @@ class GraphQLDirective:
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}({self})>"
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         return self is other or (
             isinstance(other, GraphQLDirective)
             and self.name == other.name
@@ -278,11 +251,11 @@ class GraphQLDirective:
             extension_ast_nodes=self.extension_ast_nodes,
         )
 
-    def __copy__(self) -> "GraphQLDirective":  # pragma: no cover
+    def __copy__(self) -> GraphQLDirective:  # pragma: no cover
         return self.__class__(**self.to_kwargs())
 
 
-def is_directive(directive: Any) -> bool:
+def is_directive(directive: Any) -> TypeGuard[GraphQLDirective]:
     """Test if the given value is a GraphQL directive.
 
     :param directive: the value to inspect
@@ -316,8 +289,9 @@ def assert_directive(directive: Any) -> GraphQLDirective:
     TypeError: Expected String to be a GraphQL directive.
     """
     if not is_directive(directive):
-        raise TypeError(f"Expected {inspect(directive)} to be a GraphQL directive.")
-    return cast(GraphQLDirective, directive)
+        msg = f"Expected {inspect(directive)} to be a GraphQL directive."
+        raise TypeError(msg)
+    return directive
 
 
 GraphQLIncludeDirective = GraphQLDirective(
@@ -337,7 +311,6 @@ GraphQLIncludeDirective = GraphQLDirective(
 )
 """Used to conditionally include fields or fragments."""
 
-
 GraphQLSkipDirective = GraphQLDirective(
     name="skip",
     locations=[
@@ -355,6 +328,50 @@ GraphQLSkipDirective = GraphQLDirective(
 )
 """Used to conditionally skip (exclude) fields or fragments."""
 
+GraphQLDeferDirective = GraphQLDirective(
+    name="defer",
+    description="Directs the executor to defer this fragment"
+    " when the `if` argument is true or undefined.",
+    locations=[DirectiveLocation.FRAGMENT_SPREAD, DirectiveLocation.INLINE_FRAGMENT],
+    args={
+        "if": GraphQLArgument(
+            GraphQLNonNull(GraphQLBoolean),
+            description="Deferred when true or undefined.",
+            default_value=True,
+        ),
+        "label": GraphQLArgument(GraphQLString, description="Unique name"),
+    },
+)
+"""Experimental directive used to conditionally defer fragments.
+
+This directive is exported for schemas that explicitly opt in to incremental
+delivery. It is not included in ``specified_directives``.
+"""
+
+GraphQLStreamDirective = GraphQLDirective(
+    name="stream",
+    description="Directs the executor to stream plural fields"
+    " when the `if` argument is true or undefined.",
+    locations=[DirectiveLocation.FIELD],
+    args={
+        "if": GraphQLArgument(
+            GraphQLNonNull(GraphQLBoolean),
+            description="Stream when true or undefined.",
+            default_value=True,
+        ),
+        "label": GraphQLArgument(GraphQLString, description="Unique name"),
+        "initialCount": GraphQLArgument(
+            GraphQLInt,
+            description="Number of items to return immediately",
+            default_value=0,
+        ),
+    },
+)
+"""Experimental directive used to conditionally stream list fields.
+
+This directive is exported for schemas that explicitly opt in to incremental
+delivery. It is not included in ``specified_directives``.
+"""
 
 DEFAULT_DEPRECATION_REASON = "No longer supported"
 """Constant string used for default reason for a deprecation."""
@@ -370,20 +387,20 @@ GraphQLDeprecatedDirective = GraphQLDirective(
     ],
     args={
         "reason": GraphQLArgument(
-            GraphQLString,
+            GraphQLNonNull(GraphQLString),
             description="Explains why this element was deprecated,"
             " usually also including a suggestion for how to access"
             " supported similar data."
             " Formatted using the Markdown syntax, as specified by"
             " [CommonMark](https://commonmark.org/).",
-            default_value=DEFAULT_DEPRECATION_REASON,
+            default=GraphQLDefaultInput(value=DEFAULT_DEPRECATION_REASON),
         )
     },
     description="Marks an element of a GraphQL schema as no longer supported.",
 )
 """Used to declare element of a GraphQL schema as deprecated.
 
-The optional ``reason`` argument defaults to ``DEFAULT_DEPRECATION_REASON``.
+The ``reason`` argument is non-null and defaults to ``DEFAULT_DEPRECATION_REASON``.
 """
 
 GraphQLSpecifiedByDirective = GraphQLDirective(
@@ -403,19 +420,37 @@ GraphQLOneOfDirective = GraphQLDirective(
     name="oneOf",
     locations=[DirectiveLocation.INPUT_OBJECT],
     args={},
-    description="Indicates an Input Object is a OneOf Input Object.",
+    description="Indicates exactly one field must be supplied"
+    " and this field must not be `null`.",
 )
 """Used to indicate an Input Object is a OneOf Input Object."""
 
+GraphQLDisableErrorPropagationDirective = GraphQLDirective(
+    name="experimental_disableErrorPropagation",
+    locations=[
+        DirectiveLocation.QUERY,
+        DirectiveLocation.MUTATION,
+        DirectiveLocation.SUBSCRIPTION,
+    ],
+    description="Disables error propagation.",
+)
+"""Disables error propagation (experimental).
 
-specified_directives: Tuple[GraphQLDirective, ...] = (
+:meta private:
+"""
+
+specified_directives: tuple[GraphQLDirective, ...] = (
     GraphQLIncludeDirective,
     GraphQLSkipDirective,
     GraphQLDeprecatedDirective,
     GraphQLSpecifiedByDirective,
     GraphQLOneOfDirective,
 )
-"""A tuple with all directives from the GraphQL specification"""
+"""A tuple with all directives from the GraphQL specification
+
+Experimental ``@defer`` and ``@stream`` are exported separately and are not
+included in this tuple.
+"""
 
 
 def is_specified_directive(directive: GraphQLDirective) -> bool:

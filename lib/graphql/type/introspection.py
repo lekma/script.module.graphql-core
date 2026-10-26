@@ -1,31 +1,37 @@
 """GraphQL introspection"""
 
-from enum import Enum
-from typing import Mapping
+from __future__ import annotations
 
+from enum import Enum
+from typing import TYPE_CHECKING
+
+from ..language import DirectiveLocation, print_ast
+from ..pyutils import inspect
 from .definition import (
     GraphQLArgument,
+    GraphQLDefaultInput,
     GraphQLEnumType,
     GraphQLEnumValue,
     GraphQLField,
     GraphQLFieldMap,
+    GraphQLInputObjectType,
+    GraphQLInterfaceType,
     GraphQLList,
     GraphQLNamedType,
     GraphQLNonNull,
     GraphQLObjectType,
+    GraphQLScalarType,
+    GraphQLUnionType,
     is_abstract_type,
     is_enum_type,
     is_input_object_type,
     is_interface_type,
-    is_list_type,
-    is_non_null_type,
     is_object_type,
-    is_scalar_type,
-    is_union_type,
 )
-from ..language import DirectiveLocation, print_ast
-from ..pyutils import inspect
 from .scalars import GraphQLBoolean, GraphQLString
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = [
     "SchemaMetaFieldDef",
@@ -145,7 +151,8 @@ class DirectiveFields(GraphQLFieldMap):
                 GraphQLNonNull(GraphQLList(GraphQLNonNull(_InputValue))),
                 args={
                     "includeDeprecated": GraphQLArgument(
-                        GraphQLBoolean, default_value=False
+                        GraphQLNonNull(GraphQLBoolean),
+                        default=GraphQLDefaultInput(value=False),
                     )
                 },
                 resolve=cls.args,
@@ -176,7 +183,6 @@ class DirectiveFields(GraphQLFieldMap):
     def locations(directive, _info):
         return directive.locations
 
-    # noinspection PyPep8Naming
     @staticmethod
     def args(directive, _info, includeDeprecated=False):
         items = directive.args.items()
@@ -244,7 +250,11 @@ _DirectiveLocation: GraphQLEnumType = GraphQLEnumType(
         ),
         "VARIABLE_DEFINITION": GraphQLEnumValue(
             DirectiveLocation.VARIABLE_DEFINITION,
-            description="Location adjacent to a variable definition.",
+            description="Location adjacent to an operation variable definition.",
+        ),
+        "FRAGMENT_VARIABLE_DEFINITION": GraphQLEnumValue(
+            DirectiveLocation.FRAGMENT_VARIABLE_DEFINITION,
+            description="Location adjacent to a fragment variable definition.",
         ),
         "SCHEMA": GraphQLEnumValue(
             DirectiveLocation.SCHEMA,
@@ -310,7 +320,8 @@ class TypeFields(GraphQLFieldMap):
                 GraphQLList(GraphQLNonNull(_Field)),
                 args={
                     "includeDeprecated": GraphQLArgument(
-                        GraphQLBoolean, default_value=False
+                        GraphQLNonNull(GraphQLBoolean),
+                        default=GraphQLDefaultInput(value=False),
                     )
                 },
                 resolve=cls.fields,
@@ -326,7 +337,8 @@ class TypeFields(GraphQLFieldMap):
                 GraphQLList(GraphQLNonNull(_EnumValue)),
                 args={
                     "includeDeprecated": GraphQLArgument(
-                        GraphQLBoolean, default_value=False
+                        GraphQLNonNull(GraphQLBoolean),
+                        default=GraphQLDefaultInput(value=False),
                     )
                 },
                 resolve=cls.enum_values,
@@ -335,7 +347,8 @@ class TypeFields(GraphQLFieldMap):
                 GraphQLList(GraphQLNonNull(_InputValue)),
                 args={
                     "includeDeprecated": GraphQLArgument(
-                        GraphQLBoolean, default_value=False
+                        GraphQLNonNull(GraphQLBoolean),
+                        default=GraphQLDefaultInput(value=False),
                     )
                 },
                 resolve=cls.input_fields,
@@ -346,25 +359,27 @@ class TypeFields(GraphQLFieldMap):
 
     @staticmethod
     def kind(type_, _info):
-        if is_scalar_type(type_):
-            return TypeKind.SCALAR
-        if is_object_type(type_):
-            return TypeKind.OBJECT
-        if is_interface_type(type_):
-            return TypeKind.INTERFACE
-        if is_union_type(type_):
-            return TypeKind.UNION
-        if is_enum_type(type_):
-            return TypeKind.ENUM
-        if is_input_object_type(type_):
-            return TypeKind.INPUT_OBJECT
-        if is_list_type(type_):
-            return TypeKind.LIST
-        if is_non_null_type(type_):
-            return TypeKind.NON_NULL
-
-        # Not reachable. All possible types have been considered.
-        raise TypeError(f"Unexpected type: {inspect(type_)}.")  # pragma: no cover
+        match type_:
+            case GraphQLScalarType():
+                return TypeKind.SCALAR
+            case GraphQLObjectType():
+                return TypeKind.OBJECT
+            case GraphQLInterfaceType():
+                return TypeKind.INTERFACE
+            case GraphQLUnionType():
+                return TypeKind.UNION
+            case GraphQLEnumType():
+                return TypeKind.ENUM
+            case GraphQLInputObjectType():
+                return TypeKind.INPUT_OBJECT
+            case GraphQLList():
+                return TypeKind.LIST
+            case GraphQLNonNull():
+                return TypeKind.NON_NULL
+            case _:  # pragma: no cover
+                # Not reachable. All possible types have been considered.
+                msg = f"Unexpected type: {inspect(type_)}."
+                raise TypeError(msg)
 
     @staticmethod
     def name(type_, _info):
@@ -378,48 +393,52 @@ class TypeFields(GraphQLFieldMap):
     def specified_by_url(type_, _info):
         return getattr(type_, "specified_by_url", None)
 
-    # noinspection PyPep8Naming
     @staticmethod
     def fields(type_, _info, includeDeprecated=False):
-        if is_object_type(type_) or is_interface_type(type_):
-            items = type_.fields.items()
-            return (
-                list(items)
-                if includeDeprecated
-                else [item for item in items if item[1].deprecation_reason is None]
-            )
+        if not (is_object_type(type_) or is_interface_type(type_)):
+            return None
+        items = type_.fields.items()
+        return (
+            list(items)
+            if includeDeprecated
+            else [item for item in items if item[1].deprecation_reason is None]
+        )
 
     @staticmethod
     def interfaces(type_, _info):
-        if is_object_type(type_) or is_interface_type(type_):
-            return type_.interfaces
+        return (
+            type_.interfaces
+            if is_object_type(type_) or is_interface_type(type_)
+            else None
+        )
 
     @staticmethod
     def possible_types(type_, info):
-        if is_abstract_type(type_):
-            return info.schema.get_possible_types(type_)
+        return (
+            info.schema.get_possible_types(type_) if is_abstract_type(type_) else None
+        )
 
-    # noinspection PyPep8Naming
     @staticmethod
     def enum_values(type_, _info, includeDeprecated=False):
-        if is_enum_type(type_):
-            items = type_.values.items()
-            return (
-                items
-                if includeDeprecated
-                else [item for item in items if item[1].deprecation_reason is None]
-            )
+        if not is_enum_type(type_):
+            return None
+        items = type_.values.items()
+        return (
+            items
+            if includeDeprecated
+            else [item for item in items if item[1].deprecation_reason is None]
+        )
 
-    # noinspection PyPep8Naming
     @staticmethod
     def input_fields(type_, _info, includeDeprecated=False):
-        if is_input_object_type(type_):
-            items = type_.fields.items()
-            return (
-                items
-                if includeDeprecated
-                else [item for item in items if item[1].deprecation_reason is None]
-            )
+        if not is_input_object_type(type_):
+            return None
+        items = type_.fields.items()
+        return (
+            items
+            if includeDeprecated
+            else [item for item in items if item[1].deprecation_reason is None]
+        )
 
     @staticmethod
     def of_type(type_, _info):
@@ -428,9 +447,6 @@ class TypeFields(GraphQLFieldMap):
     @staticmethod
     def is_one_of(type_, _info):
         return type_.is_one_of if is_input_object_type(type_) else None
-
-
-TypeResolvers = TypeFields  # for backward compatibility
 
 
 _Type: GraphQLObjectType = GraphQLObjectType(
@@ -459,7 +475,8 @@ class FieldFields(GraphQLFieldMap):
                 GraphQLNonNull(GraphQLList(GraphQLNonNull(_InputValue))),
                 args={
                     "includeDeprecated": GraphQLArgument(
-                        GraphQLBoolean, default_value=False
+                        GraphQLNonNull(GraphQLBoolean),
+                        default=GraphQLDefaultInput(value=False),
                     )
                 },
                 resolve=cls.args,
@@ -482,7 +499,6 @@ class FieldFields(GraphQLFieldMap):
     def description(item, _info):
         return item[1].description
 
-    # noinspection PyPep8Naming
     @staticmethod
     def args(item, _info, includeDeprecated=False):
         items = item[1].args.items()
@@ -552,11 +568,15 @@ class InputValueFields(GraphQLFieldMap):
 
     @staticmethod
     def default_value(item, _info):
-        # Since ast_from_value needs graphql.type, it can only be imported later
-        from ..utilities import ast_from_value
+        # Since get_default_value_ast needs graphql.type,
+        # it can only be imported later
+        from ..utilities import get_default_value_ast
 
-        value_ast = ast_from_value(item[1].default_value, item[1].type)
-        return print_ast(value_ast) if value_ast else None
+        input_value = item[1]
+        ast = get_default_value_ast(input_value)
+        if ast:
+            return print_ast(ast)
+        return None
 
     @staticmethod
     def is_deprecated(item, _info):
@@ -624,24 +644,19 @@ _EnumValue: GraphQLObjectType = GraphQLObjectType(
 
 
 class TypeKind(Enum):
-    """The introspection enum describing the different kinds of GraphQL types."""
+    """Kinds of types
+
+    The introspection enum describing the different kinds of GraphQL types.
+    """
 
     SCALAR = "scalar"
-    """A scalar type."""
     OBJECT = "object"
-    """An object type."""
     INTERFACE = "interface"
-    """An interface type."""
     UNION = "union"
-    """A union type."""
     ENUM = "enum"
-    """An enum type."""
     INPUT_OBJECT = "input object"
-    """An input object type."""
     LIST = "list"
-    """A list wrapper type."""
     NON_NULL = "non-null"
-    """A non-null wrapper type."""
 
 
 _TypeKind: GraphQLEnumType = GraphQLEnumType(
@@ -761,4 +776,4 @@ def is_introspection_type(type_: GraphQLNamedType) -> bool:
 
 
 # register the introspection types to avoid redefinition
-GraphQLNamedType.reserved_types.update(introspection_types)
+GraphQLNamedType.reserved_types |= introspection_types  # type: ignore

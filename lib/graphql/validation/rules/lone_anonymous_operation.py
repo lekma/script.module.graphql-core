@@ -1,5 +1,7 @@
 """Lone anonymous operation rule"""
 
+from __future__ import annotations
+
 from typing import Any
 
 from ...error import GraphQLError
@@ -31,7 +33,7 @@ class LoneAnonymousOperationRule(ASTValidationRule):
     []
     """
 
-    def __init__(self, context: ASTValidationContext):
+    def __init__(self, context: ASTValidationContext) -> None:
         super().__init__(context)
         self.operation_count = 0
 

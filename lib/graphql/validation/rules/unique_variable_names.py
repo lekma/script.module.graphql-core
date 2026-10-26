@@ -1,12 +1,16 @@
 """Unique variable names rule"""
 
+from __future__ import annotations
+
 from operator import attrgetter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...error import GraphQLError
-from ...language import OperationDefinitionNode
 from ...pyutils import group_by
 from . import ASTValidationRule
+
+if TYPE_CHECKING:
+    from ...language import OperationDefinitionNode
 
 __all__ = ["UniqueVariableNamesRule"]
 
@@ -37,7 +41,7 @@ class UniqueVariableNamesRule(ASTValidationRule):
 
         :meta private:
         """
-        variable_definitions = node.variable_definitions
+        variable_definitions = node.variable_definitions or ()
 
         seen_variable_definitions = group_by(
             variable_definitions, attrgetter("variable.name.value")

@@ -1,9 +1,11 @@
 """Unique operation names rule"""
 
-from typing import Any, Dict
+from __future__ import annotations
+
+from typing import Any
 
 from ...error import GraphQLError
-from ...language import NameNode, OperationDefinitionNode, VisitorAction, SKIP
+from ...language import SKIP, NameNode, OperationDefinitionNode, VisitorAction
 from . import ASTValidationContext, ASTValidationRule
 
 __all__ = ["UniqueOperationNamesRule"]
@@ -30,9 +32,9 @@ class UniqueOperationNamesRule(ASTValidationRule):
     []
     """
 
-    def __init__(self, context: ASTValidationContext):
+    def __init__(self, context: ASTValidationContext) -> None:
         super().__init__(context)
-        self.known_operation_names: Dict[str, NameNode] = {}
+        self.known_operation_names: dict[str, NameNode] = {}
 
     def enter_operation_definition(
         self, node: OperationDefinitionNode, *_args: Any

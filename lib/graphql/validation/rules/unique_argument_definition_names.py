@@ -1,10 +1,13 @@
 """Unique argument definition names rule"""
 
+from __future__ import annotations
+
 from operator import attrgetter
-from typing import Any, Collection
+from typing import TYPE_CHECKING, Any
 
 from ...error import GraphQLError
 from ...language import (
+    SKIP,
     DirectiveDefinitionNode,
     FieldDefinitionNode,
     InputValueDefinitionNode,
@@ -14,10 +17,12 @@ from ...language import (
     ObjectTypeDefinitionNode,
     ObjectTypeExtensionNode,
     VisitorAction,
-    SKIP,
 )
 from ...pyutils import group_by
 from . import SDLValidationRule
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 __all__ = ["UniqueArgumentDefinitionNamesRule"]
 
@@ -95,27 +100,29 @@ class UniqueArgumentDefinitionNamesRule(SDLValidationRule):
     def check_arg_uniqueness_per_field(
         self,
         name: NameNode,
-        fields: Collection[FieldDefinitionNode],
+        fields: Collection[FieldDefinitionNode] | None,
     ) -> VisitorAction:
         """Check argument definition names of all fields of a type.
 
         :meta private:
         """
         type_name = name.value
-        for field_def in fields:
+        for field_def in fields or ():
             field_name = field_def.name.value
             argument_nodes = field_def.arguments or ()
             self.check_arg_uniqueness(f"{type_name}.{field_name}", argument_nodes)
         return SKIP
 
     def check_arg_uniqueness(
-        self, parent_name: str, argument_nodes: Collection[InputValueDefinitionNode]
+        self,
+        parent_name: str,
+        argument_nodes: Collection[InputValueDefinitionNode] | None,
     ) -> VisitorAction:
         """Report argument definitions with the same name.
 
         :meta private:
         """
-        seen_args = group_by(argument_nodes, attrgetter("name.value"))
+        seen_args = group_by(argument_nodes or (), attrgetter("name.value"))
         for arg_name, arg_nodes in seen_args.items():
             if len(arg_nodes) > 1:
                 self.report_error(

@@ -21,10 +21,12 @@ class DirectiveLocation(Enum):
     """Directive location for fragment definitions."""
     FRAGMENT_SPREAD = "fragment spread"
     """Directive location for fragment spreads."""
-    VARIABLE_DEFINITION = "variable definition"
-    """Directive location for variable definitions."""
     INLINE_FRAGMENT = "inline fragment"
     """Directive location for inline fragments."""
+    VARIABLE_DEFINITION = "variable definition"
+    """Directive location for variable definitions."""
+    FRAGMENT_VARIABLE_DEFINITION = "fragment variable definition"
+    """Directive location for fragment variable definitions."""
 
     # Type System Definitions
     SCHEMA = "schema"

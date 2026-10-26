@@ -1,6 +1,8 @@
 """GraphQL Schema creation from GraphQL AST"""
 
-from typing import cast, Union
+from __future__ import annotations
+
+from typing import cast
 
 from ..language import DocumentNode, Source, parse
 from ..type import (
@@ -53,7 +55,8 @@ def build_ast_schema(
     >>> schema.query_type.name
     'Query'
 
-    This variant uses validation options when the SDL references unknown directives:
+    This variant uses validation options when the SDL references unknown
+    directives:
 
     >>> document = parse('type Query { hello: String @unknown }')
     >>> build_ast_schema(document)
@@ -62,9 +65,6 @@ def build_ast_schema(
     TypeError: Unknown directive '@unknown'.
     >>> schema = build_ast_schema(document, assume_valid=True, assume_valid_sdl=True)
     """
-    if not isinstance(document_ast, DocumentNode):
-        raise TypeError("Must provide valid Document AST.")
-
     if not (assume_valid or assume_valid_sdl):
         from ..validation.validate import assert_valid_sdl
 
@@ -93,19 +93,20 @@ def build_ast_schema(
             # validation with validate_schema() will produce more actionable results.
             type_name = type_.name
             if type_name == "Query":
-                schema_kwargs["query"] = cast(GraphQLObjectType, type_)
+                schema_kwargs["query"] = cast("GraphQLObjectType", type_)
             elif type_name == "Mutation":
-                schema_kwargs["mutation"] = cast(GraphQLObjectType, type_)
+                schema_kwargs["mutation"] = cast("GraphQLObjectType", type_)
             elif type_name == "Subscription":
-                schema_kwargs["subscription"] = cast(GraphQLObjectType, type_)
+                schema_kwargs["subscription"] = cast("GraphQLObjectType", type_)
 
     # If specified directives were not explicitly declared, add them.
     directives = schema_kwargs["directives"]
-    directive_names = set(directive.name for directive in directives)
-    missing_directives = []
-    for directive in specified_directives:
-        if directive.name not in directive_names:
-            missing_directives.append(directive)
+    directive_names = {directive.name for directive in directives}
+    missing_directives = [
+        directive
+        for directive in specified_directives
+        if directive.name not in directive_names
+    ]
     if missing_directives:
         schema_kwargs["directives"] = directives + tuple(missing_directives)
 
@@ -113,14 +114,15 @@ def build_ast_schema(
 
 
 def build_schema(
-    source: Union[str, Source],
+    source: str | Source,
     assume_valid: bool = False,
     assume_valid_sdl: bool = False,
     no_location: bool = False,
-    allow_legacy_fragment_variables: bool = False,
-    experimental_directives_on_directive_definitions: bool = False,
+    experimental_fragment_arguments: bool = False,
 ) -> GraphQLSchema:
     r"""Build a GraphQLSchema directly from a source document.
+
+    Builds a GraphQLSchema directly from a schema definition language source.
 
     :param source: The GraphQL source text or source object.
     :param assume_valid: Set to ``True`` to assume the produced schema is valid and
@@ -129,10 +131,8 @@ def build_schema(
         skip SDL validation.
     :param no_location: Set to ``True`` to create AST nodes without location
         information.
-    :param allow_legacy_fragment_variables: Allows legacy fragment variable
-        definitions to be parsed (deprecated, will be removed in v3.3).
-    :param experimental_directives_on_directive_definitions: Allows directives on
-        directive definitions to be parsed (experimental).
+    :param experimental_fragment_arguments: Allows fragment variable definitions
+        and arguments on fragment spreads to be parsed (experimental).
     :returns: The schema built from the provided SDL document.
 
     Build a schema from SDL source using the default options:
@@ -147,7 +147,7 @@ def build_schema(
     >>> schema = build_schema(
     ...     'directive @tag on DIRECTIVE_DEFINITION\n'
     ...     'directive @compose @tag on FIELD_DEFINITION',
-    ...     experimental_directives_on_directive_definitions=True,
+    ...     experimental_fragment_arguments=True,
     ...     no_location=True,
     ... )
     >>> directive = schema.get_directive('compose')
@@ -160,10 +160,7 @@ def build_schema(
         parse(
             source,
             no_location=no_location,
-            allow_legacy_fragment_variables=allow_legacy_fragment_variables,
-            experimental_directives_on_directive_definitions=(
-                experimental_directives_on_directive_definitions
-            ),
+            experimental_fragment_arguments=experimental_fragment_arguments,
         ),
         assume_valid=assume_valid,
         assume_valid_sdl=assume_valid_sdl,

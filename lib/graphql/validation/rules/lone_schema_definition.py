@@ -1,10 +1,14 @@
 """Lone Schema definition rule"""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from ...error import GraphQLError
-from ...language import SchemaDefinitionNode
-from . import SDLValidationRule, SDLValidationContext
+from . import SDLValidationContext, SDLValidationRule
+
+if TYPE_CHECKING:
+    from ...language import SchemaDefinitionNode
 
 __all__ = ["LoneSchemaDefinitionRule"]
 
@@ -34,7 +38,7 @@ class LoneSchemaDefinitionRule(SDLValidationRule):
     >>> schema = build_schema(sdl)
     """
 
-    def __init__(self, context: SDLValidationContext):
+    def __init__(self, context: SDLValidationContext) -> None:
         super().__init__(context)
         old_schema = context.schema
         self.already_defined = old_schema and (

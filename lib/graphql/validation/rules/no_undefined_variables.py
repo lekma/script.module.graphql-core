@@ -1,10 +1,14 @@
 """No undefined variables rule"""
 
-from typing import Any, Set
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from ...error import GraphQLError
-from ...language import OperationDefinitionNode, VariableDefinitionNode
 from . import ValidationContext, ValidationRule
+
+if TYPE_CHECKING:
+    from ...language import OperationDefinitionNode, VariableDefinitionNode
 
 __all__ = ["NoUndefinedVariablesRule"]
 
@@ -31,9 +35,9 @@ class NoUndefinedVariablesRule(ValidationRule):
     []
     """
 
-    def __init__(self, context: ValidationContext):
+    def __init__(self, context: ValidationContext) -> None:
         super().__init__(context)
-        self.defined_variable_names: Set[str] = set()
+        self.defined_variable_names: set[str] = set()
 
     def enter_operation_definition(self, *_args: Any) -> None:
         """Called when entering an operation definition node.
@@ -53,16 +57,16 @@ class NoUndefinedVariablesRule(ValidationRule):
         defined_variables = self.defined_variable_names
         for usage in usages:
             node = usage.node
+            if usage.fragment_variable_definition:
+                continue
             var_name = node.name.value
             if var_name not in defined_variables:
                 self.report_error(
                     GraphQLError(
-                        (
-                            f"Variable '${var_name}' is not defined"
-                            f" by operation '{operation.name.value}'."
-                            if operation.name
-                            else f"Variable '${var_name}' is not defined."
-                        ),
+                        f"Variable '${var_name}' is not defined"
+                        f" by operation '{operation.name.value}'."
+                        if operation.name
+                        else f"Variable '${var_name}' is not defined.",
                         [node, operation],
                     )
                 )

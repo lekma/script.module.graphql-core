@@ -1,7 +1,9 @@
 """Unique directive names per location rule"""
 
+from __future__ import annotations
+
 from collections import defaultdict
-from typing import Any, Dict, List, Union, cast
+from typing import Any, cast
 
 from ...error import GraphQLError
 from ...language import (
@@ -11,8 +13,6 @@ from ...language import (
     Node,
     SchemaDefinitionNode,
     SchemaExtensionNode,
-    TypeDefinitionNode,
-    TypeExtensionNode,
     is_type_definition_node,
     is_type_extension_node,
 )
@@ -44,16 +44,16 @@ class UniqueDirectivesPerLocationRule(ASTValidationRule):
     []
     """
 
-    context: Union[ValidationContext, SDLValidationContext]
+    context: ValidationContext | SDLValidationContext
     """The validation context used while checking the document."""
 
-    def __init__(self, context: Union[ValidationContext, SDLValidationContext]):
+    def __init__(self, context: ValidationContext | SDLValidationContext) -> None:
         super().__init__(context)
-        unique_directive_map: Dict[str, bool] = {}
+        unique_directive_map: dict[str, bool] = {}
 
         schema = context.schema
         defined_directives = (
-            schema.directives if schema else cast(List, specified_directives)
+            schema.directives if schema else cast("list", specified_directives)
         )
         for directive in defined_directives:
             unique_directive_map[directive.name] = not directive.is_repeatable
@@ -64,11 +64,11 @@ class UniqueDirectivesPerLocationRule(ASTValidationRule):
                 unique_directive_map[def_.name.value] = not def_.repeatable
         self.unique_directive_map = unique_directive_map
 
-        self.schema_directives: Dict[str, DirectiveNode] = {}
-        self.type_directives_map: Dict[str, Dict[str, DirectiveNode]] = defaultdict(
+        self.schema_directives: dict[str, DirectiveNode] = {}
+        self.type_directives_map: dict[str, dict[str, DirectiveNode]] = defaultdict(
             dict
         )
-        self.directive_directives_map: Dict[str, Dict[str, DirectiveNode]] = (
+        self.directive_directives_map: dict[str, dict[str, DirectiveNode]] = (
             defaultdict(dict)
         )
 
@@ -82,12 +82,11 @@ class UniqueDirectivesPerLocationRule(ASTValidationRule):
         directives = getattr(node, "directives", None)
         if not directives:
             return
-        directives = cast(List[DirectiveNode], directives)
+        directives = cast("list[DirectiveNode]", directives)
 
         if isinstance(node, (SchemaDefinitionNode, SchemaExtensionNode)):
             seen_directives = self.schema_directives
         elif is_type_definition_node(node) or is_type_extension_node(node):
-            node = cast(Union[TypeDefinitionNode, TypeExtensionNode], node)
             type_name = node.name.value
             seen_directives = self.type_directives_map[type_name]
         elif isinstance(node, (DirectiveDefinitionNode, DirectiveExtensionNode)):

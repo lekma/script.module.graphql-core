@@ -1,20 +1,23 @@
 """Known argument names on directives rule"""
 
-from typing import cast, Any, Dict, List, Union
+from __future__ import annotations
+
+from typing import Any, cast
 
 from ...error import GraphQLError
 from ...language import (
+    SKIP,
     ArgumentNode,
     DirectiveDefinitionNode,
     DirectiveNode,
-    SKIP,
+    FragmentArgumentNode,
     VisitorAction,
 )
 from ...pyutils import did_you_mean, suggestion_list
 from ...type import specified_directives
 from . import ASTValidationRule, SDLValidationContext, ValidationContext
 
-__all__ = ["KnownArgumentNamesRule", "KnownArgumentNamesOnDirectivesRule"]
+__all__ = ["KnownArgumentNamesOnDirectivesRule", "KnownArgumentNamesRule"]
 
 
 class KnownArgumentNamesOnDirectivesRule(ASTValidationRule):
@@ -25,16 +28,16 @@ class KnownArgumentNamesOnDirectivesRule(ASTValidationRule):
     For internal use only.
     """
 
-    context: Union[ValidationContext, SDLValidationContext]
+    context: ValidationContext | SDLValidationContext
     """The validation context used while checking the document."""
 
-    def __init__(self, context: Union[ValidationContext, SDLValidationContext]):
+    def __init__(self, context: ValidationContext | SDLValidationContext) -> None:
         super().__init__(context)
-        directive_args: Dict[str, List[str]] = {}
+        directive_args: dict[str, list[str]] = {}
 
         schema = context.schema
         defined_directives = schema.directives if schema else specified_directives
-        for directive in cast(List, defined_directives):
+        for directive in cast("list", defined_directives):
             directive_args[directive.name] = list(directive.args)
 
         ast_definitions = context.document.definitions
@@ -60,7 +63,11 @@ class KnownArgumentNamesOnDirectivesRule(ASTValidationRule):
                         GraphQLError(
                             f"Unknown argument '{arg_name}'"
                             f" on directive '@{directive_name}'."
-                            + did_you_mean(suggestions),
+                            + (
+                                ""
+                                if self.context.hide_suggestions
+                                else did_you_mean(suggestions)
+                            ),
                             arg_node,
                         )
                     )
@@ -92,8 +99,43 @@ class KnownArgumentNamesRule(KnownArgumentNamesOnDirectivesRule):
     context: ValidationContext
     """The validation context used while checking the document."""
 
-    def __init__(self, context: ValidationContext):
+    def __init__(self, context: ValidationContext) -> None:
         super().__init__(context)
+
+    def enter_fragment_argument(
+        self, arg_node: FragmentArgumentNode, *_args: Any
+    ) -> None:
+        """Called when entering a fragment argument node.
+
+        :meta private:
+        """
+        context = self.context
+        fragment_signature = context.get_fragment_signature()
+        if fragment_signature:
+            var_def = fragment_signature.variable_definitions.get(arg_node.name.value)
+            if not var_def:
+                arg_name = arg_node.name.value
+                suggestions = (
+                    []
+                    if context.hide_suggestions
+                    else suggestion_list(
+                        arg_name,
+                        [
+                            var_signature.variable.name.value
+                            for var_signature in (
+                                fragment_signature.variable_definitions.values()
+                            )
+                        ],
+                    )
+                )
+                context.report_error(
+                    GraphQLError(
+                        f"Unknown argument '{arg_name}'"
+                        f" on fragment '{fragment_signature.definition.name.value}'."
+                        + did_you_mean(suggestions),
+                        arg_node,
+                    )
+                )
 
     def enter_argument(self, arg_node: ArgumentNode, *args: Any) -> None:
         """Called when entering an argument node.
@@ -108,11 +150,15 @@ class KnownArgumentNamesRule(KnownArgumentNamesOnDirectivesRule):
             arg_name = arg_node.name.value
             field_name = args[3][-1].name.value
             known_args_names = list(field_def.args)
-            suggestions = suggestion_list(arg_name, known_args_names)
+            suggestions = (
+                []
+                if context.hide_suggestions
+                else suggestion_list(arg_name, known_args_names)
+            )
             context.report_error(
                 GraphQLError(
                     f"Unknown argument '{arg_name}'"
-                    f" on field '{parent_type.name}.{field_name}'."
+                    f" on field '{parent_type}.{field_name}'."
                     + did_you_mean(suggestions),
                     arg_node,
                 )

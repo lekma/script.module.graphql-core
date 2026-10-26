@@ -1,30 +1,46 @@
 """Validation context"""
 
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union, cast
+from __future__ import annotations
 
-from ..error import GraphQLError
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    NamedTuple,
+    cast,
+)
+
 from ..language import (
     DocumentNode,
     FragmentDefinitionNode,
     FragmentSpreadNode,
     OperationDefinitionNode,
     SelectionSetNode,
+    VariableDefinitionNode,
     VariableNode,
     Visitor,
     VisitorAction,
     visit,
 )
-from ..type import (
-    GraphQLArgument,
-    GraphQLCompositeType,
-    GraphQLDirective,
-    GraphQLEnumValue,
-    GraphQLField,
-    GraphQLInputType,
-    GraphQLOutputType,
-    GraphQLSchema,
-)
+from ..pyutils import Undefined
 from ..utilities import TypeInfo, TypeInfoVisitor
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..error import GraphQLError
+    from ..type import (
+        GraphQLArgument,
+        GraphQLCompositeType,
+        GraphQLDirective,
+        GraphQLEnumValue,
+        GraphQLField,
+        GraphQLInputType,
+        GraphQLOutputType,
+        GraphQLSchema,
+    )
+    from ..utilities.type_info import FragmentSignature, FragmentSignatureByNameFn
+
+from typing import TypeAlias
 
 __all__ = [
     "ASTValidationContext",
@@ -34,40 +50,67 @@ __all__ = [
     "VariableUsageVisitor",
 ]
 
-NodeWithSelectionSet = Union[OperationDefinitionNode, FragmentDefinitionNode]
+NodeWithSelectionSet: TypeAlias = OperationDefinitionNode | FragmentDefinitionNode
 
 
 class VariableUsage(NamedTuple):
-    """A usage of a variable together with the expected input type."""
+    """Variable usage"""
 
     node: VariableNode
-    type: Optional[GraphQLInputType]
+    type: GraphQLInputType | None
+    parent_type: GraphQLInputType | None
     default_value: Any
-    parent_type: Optional[GraphQLInputType]
+    fragment_variable_definition: VariableDefinitionNode | None
 
 
 class VariableUsageVisitor(Visitor):
     """Visitor adding all variable usages to a given list."""
 
-    usages: List[VariableUsage]
+    usages: list[VariableUsage]
 
-    def __init__(self, type_info: TypeInfo):
+    def __init__(
+        self,
+        type_info: TypeInfo,
+        fragment_definition: FragmentDefinitionNode | None = None,
+    ) -> None:
         super().__init__()
         self.usages = []
         self._append_usage = self.usages.append
         self._type_info = type_info
+        self._fragment_definition = fragment_definition
 
     def enter_variable_definition(self, *_args: Any) -> VisitorAction:
         return self.SKIP
 
     def enter_variable(self, node: VariableNode, *_args: Any) -> VisitorAction:
         type_info = self._type_info
-        usage = VariableUsage(
-            node,
-            type_info.get_input_type(),
-            type_info.get_default_value(),
-            type_info.get_parent_input_type(),
-        )
+        fragment_definition = self._fragment_definition
+        if fragment_definition:
+            fragment_signature = type_info.get_fragment_signature_by_name()(
+                fragment_definition.name.value
+            )
+            fragment_variable_definition = (
+                fragment_signature.variable_definitions.get(node.name.value)
+                if fragment_signature
+                else None
+            )
+            # Fragment variables have a variable default but no location default,
+            # which is what this default value represents.
+            usage = VariableUsage(
+                node,
+                type_info.get_input_type(),
+                type_info.get_parent_input_type(),
+                Undefined,
+                fragment_variable_definition,
+            )
+        else:
+            usage = VariableUsage(
+                node,
+                type_info.get_input_type(),
+                type_info.get_parent_input_type(),
+                type_info.get_default_value(),
+                None,
+            )
         self._append_usage(usage)
         return None
 
@@ -96,10 +139,10 @@ class ASTValidationContext:
     document: DocumentNode
     """The document AST being validated."""
 
-    _fragments: Optional[Dict[str, FragmentDefinitionNode]]
-    _fragment_spreads: Dict[SelectionSetNode, List[FragmentSpreadNode]]
-    _recursively_referenced_fragments: Dict[
-        OperationDefinitionNode, List[FragmentDefinitionNode]
+    _fragments: dict[str, FragmentDefinitionNode] | None
+    _fragment_spreads: dict[SelectionSetNode, list[FragmentSpreadNode]]
+    _recursively_referenced_fragments: dict[
+        OperationDefinitionNode, list[FragmentDefinitionNode]
     ]
 
     def __init__(
@@ -141,7 +184,7 @@ class ASTValidationContext:
         """
         self.on_error(error)
 
-    def get_fragment(self, name: str) -> Optional[FragmentDefinitionNode]:
+    def get_fragment(self, name: str) -> FragmentDefinitionNode | None:
         """Get the fragment definition with the given name from the document.
 
         :param name: The name of the fragment.
@@ -167,7 +210,7 @@ class ASTValidationContext:
             self._fragments = fragments
         return fragments.get(name)
 
-    def get_fragment_spreads(self, node: SelectionSetNode) -> List[FragmentSpreadNode]:
+    def get_fragment_spreads(self, node: SelectionSetNode) -> list[FragmentSpreadNode]:
         """Get all fragment spreads contained in the given selection set.
 
         This includes fragment spreads in nested selection sets, but not the ones
@@ -199,7 +242,7 @@ class ASTValidationContext:
                         append_spread(selection)
                     else:
                         set_to_visit = cast(
-                            NodeWithSelectionSet, selection
+                            "NodeWithSelectionSet", selection
                         ).selection_set
                         if set_to_visit:
                             append_set(set_to_visit)
@@ -208,7 +251,7 @@ class ASTValidationContext:
 
     def get_recursively_referenced_fragments(
         self, operation: OperationDefinitionNode
-    ) -> List[FragmentDefinitionNode]:
+    ) -> list[FragmentDefinitionNode]:
         """Get all fragments referenced by the operation, directly or indirectly.
 
         :param operation: The operation definition to inspect.
@@ -231,7 +274,7 @@ class ASTValidationContext:
         if fragments is None:
             fragments = []
             append_fragment = fragments.append
-            collected_names: Set[str] = set()
+            collected_names: set[str] = set()
             add_name = collected_names.add
             nodes_to_visit = [operation.selection_set]
             append_node = nodes_to_visit.append
@@ -244,8 +287,7 @@ class ASTValidationContext:
                     frag_name = spread.name.value
                     if frag_name not in collected_names:
                         add_name(frag_name)
-                        fragment = get_fragment(frag_name)
-                        if fragment:
+                        if fragment := get_fragment(frag_name):
                             append_fragment(fragment)
                             append_node(fragment.selection_set)
             self._recursively_referenced_fragments[operation] = fragments
@@ -274,17 +316,22 @@ class SDLValidationContext(ASTValidationContext):
     True
     """
 
-    schema: Optional[GraphQLSchema]
+    schema: GraphQLSchema | None
     """The schema being extended, if any."""
 
     def __init__(
         self,
         ast: DocumentNode,
-        schema: Optional[GraphQLSchema],
+        schema: GraphQLSchema | None,
         on_error: Callable[[GraphQLError], None],
     ) -> None:
         super().__init__(ast, on_error)
         self.schema = schema
+
+    @property
+    def hide_suggestions(self) -> bool:
+        """Whether validation error suggestions are hidden (always false for SDL)."""
+        return False
 
 
 class ValidationContext(ASTValidationContext):
@@ -298,19 +345,17 @@ class ValidationContext(ASTValidationContext):
     :param ast: Document AST being validated.
     :param type_info: TypeInfo instance used to track traversal state.
     :param on_error: Callback invoked for each validation error.
+    :param hide_suggestions: Whether suggestion text should be omitted from errors.
 
     >>> from graphql import GraphQLError, TypeInfo, build_schema, parse
     >>> from graphql.validation import ValidationContext
     >>> schema = build_schema('type Query { greeting: String }')
     >>> document = parse('{ greeting }')
     >>> errors = []
-    >>> context = ValidationContext(
-    ...     schema, document, TypeInfo(schema), errors.append)
+    >>> context = ValidationContext(schema, document, TypeInfo(schema), errors.append)
     >>> context.report_error(GraphQLError('Example validation error.'))
     >>> context.schema is schema
     True
-    >>> context.schema.query_type.name
-    'Query'
     >>> errors[0].message
     'Example validation error.'
     """
@@ -319,8 +364,9 @@ class ValidationContext(ASTValidationContext):
     """The schema being validated against."""
 
     _type_info: TypeInfo
-    _variable_usages: Dict[NodeWithSelectionSet, List[VariableUsage]]
-    _recursive_variable_usages: Dict[OperationDefinitionNode, List[VariableUsage]]
+    _variable_usages: dict[NodeWithSelectionSet, list[VariableUsage]]
+    _recursive_variable_usages: dict[OperationDefinitionNode, list[VariableUsage]]
+    _hide_suggestions: bool
 
     def __init__(
         self,
@@ -328,14 +374,21 @@ class ValidationContext(ASTValidationContext):
         ast: DocumentNode,
         type_info: TypeInfo,
         on_error: Callable[[GraphQLError], None],
+        hide_suggestions: bool = False,
     ) -> None:
         super().__init__(ast, on_error)
         self.schema = schema
         self._type_info = type_info
         self._variable_usages = {}
         self._recursive_variable_usages = {}
+        self._hide_suggestions = hide_suggestions
 
-    def get_variable_usages(self, node: NodeWithSelectionSet) -> List[VariableUsage]:
+    @property
+    def hide_suggestions(self) -> bool:
+        """Whether validation error suggestions are hidden."""
+        return self._hide_suggestions
+
+    def get_variable_usages(self, node: NodeWithSelectionSet) -> list[VariableUsage]:
         """Get variable usages found directly within the given node.
 
         :param node: The operation or fragment definition to inspect.
@@ -356,7 +409,10 @@ class ValidationContext(ASTValidationContext):
         """
         usages = self._variable_usages.get(node)
         if usages is None:
-            usage_visitor = VariableUsageVisitor(self._type_info)
+            fragment_definition = (
+                node if isinstance(node, FragmentDefinitionNode) else None
+            )
+            usage_visitor = VariableUsageVisitor(self._type_info, fragment_definition)
             visit(node, TypeInfoVisitor(self._type_info, usage_visitor))
             usages = usage_visitor.usages
             self._variable_usages[node] = usages
@@ -364,7 +420,7 @@ class ValidationContext(ASTValidationContext):
 
     def get_recursive_variable_usages(
         self, operation: OperationDefinitionNode
-    ) -> List[VariableUsage]:
+    ) -> list[VariableUsage]:
         """Get variable usages for an operation, including referenced fragments.
 
         :param operation: Operation definition to inspect.
@@ -396,7 +452,7 @@ class ValidationContext(ASTValidationContext):
             self._recursive_variable_usages[operation] = usages
         return usages
 
-    def get_type(self) -> Optional[GraphQLOutputType]:
+    def get_type(self) -> GraphQLOutputType | None:
         """Get the current output type at this point in traversal.
 
         :returns: The current output type, if known.
@@ -417,7 +473,7 @@ class ValidationContext(ASTValidationContext):
         """
         return self._type_info.get_type()
 
-    def get_parent_type(self) -> Optional[GraphQLCompositeType]:
+    def get_parent_type(self) -> GraphQLCompositeType | None:
         """Get the current parent composite type.
 
         :returns: The current parent composite type, if known.
@@ -438,7 +494,7 @@ class ValidationContext(ASTValidationContext):
         """
         return self._type_info.get_parent_type()
 
-    def get_input_type(self) -> Optional[GraphQLInputType]:
+    def get_input_type(self) -> GraphQLInputType | None:
         """Get the current input type at this point in traversal.
 
         :returns: The current input type, if known.
@@ -459,7 +515,9 @@ class ValidationContext(ASTValidationContext):
         """
         return self._type_info.get_input_type()
 
-    def get_parent_input_type(self) -> Optional[GraphQLInputType]:
+    # Note: continues to expose the closest enclosing valid input type if
+    # traversal descends into syntax with no corresponding GraphQL input type.
+    def get_parent_input_type(self) -> GraphQLInputType | None:
         """Get the parent input type for the current input position.
 
         :returns: The parent input type, if known.
@@ -483,7 +541,7 @@ class ValidationContext(ASTValidationContext):
         """
         return self._type_info.get_parent_input_type()
 
-    def get_field_def(self) -> Optional[GraphQLField]:
+    def get_field_def(self) -> GraphQLField | None:
         """Get the current field definition.
 
         :returns: The current field definition, if known.
@@ -504,7 +562,7 @@ class ValidationContext(ASTValidationContext):
         """
         return self._type_info.get_field_def()
 
-    def get_directive(self) -> Optional[GraphQLDirective]:
+    def get_directive(self) -> GraphQLDirective | None:
         """Get the current directive definition.
 
         :returns: The current directive definition, if known.
@@ -525,7 +583,7 @@ class ValidationContext(ASTValidationContext):
         """
         return self._type_info.get_directive()
 
-    def get_argument(self) -> Optional[GraphQLArgument]:
+    def get_argument(self) -> GraphQLArgument | None:
         """Get the current argument definition.
 
         :returns: The current argument definition, if known.
@@ -546,7 +604,57 @@ class ValidationContext(ASTValidationContext):
         """
         return self._type_info.get_argument()
 
-    def get_enum_value(self) -> Optional[GraphQLEnumValue]:
+    def get_fragment_signature(self) -> FragmentSignature | None:
+        """Get the fragment signature at the current traversal position.
+
+        :returns: The current fragment signature, if one is active.
+
+        >>> from graphql import (
+        ...     TypeInfo, TypeInfoVisitor, Visitor, build_schema, parse, visit)
+        >>> from graphql.validation import ValidationContext
+        >>> schema = build_schema('type Query { greeting: String }')
+        >>> document = parse(
+        ...     '{ ...GreetingFields } fragment GreetingFields on Query { greeting }',
+        ...     experimental_fragment_arguments=True,
+        ... )
+        >>> type_info = TypeInfo(schema)
+        >>> context = ValidationContext(
+        ...     schema, document, type_info, lambda error: None)
+        >>> class PrintVisitor(Visitor):
+        ...     def enter_fragment_spread(self, *_args):
+        ...         print(context.get_fragment_signature().definition.name.value)
+        >>> _ = visit(document, TypeInfoVisitor(type_info, PrintVisitor()))
+        GreetingFields
+        """
+        return self._type_info.get_fragment_signature()
+
+    def get_fragment_signature_by_name(self) -> FragmentSignatureByNameFn:
+        """Get the function used to look up fragment signatures by name.
+
+        :returns: A function that maps fragment names to fragment signatures.
+
+        >>> from graphql import (
+        ...     TypeInfo, TypeInfoVisitor, Visitor, build_schema, parse, visit)
+        >>> from graphql.validation import ValidationContext
+        >>> schema = build_schema('type Query { greeting: String }')
+        >>> document = parse(
+        ...     '{ ...GreetingFields } fragment GreetingFields on Query { greeting }',
+        ...     experimental_fragment_arguments=True,
+        ... )
+        >>> type_info = TypeInfo(schema)
+        >>> context = ValidationContext(
+        ...     schema, document, type_info, lambda error: None)
+        >>> class PrintVisitor(Visitor):
+        ...     def enter_document(self, *_args):
+        ...         get_fragment_signature = context.get_fragment_signature_by_name()
+        ...         signature = get_fragment_signature('GreetingFields')
+        ...         print(signature.definition.name.value)
+        >>> _ = visit(document, TypeInfoVisitor(type_info, PrintVisitor()))
+        GreetingFields
+        """
+        return self._type_info.get_fragment_signature_by_name()
+
+    def get_enum_value(self) -> GraphQLEnumValue | None:
         """Get the current enum value definition.
 
         :returns: The current enum value definition, if known.

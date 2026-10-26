@@ -1,10 +1,13 @@
 """Awaitable or value type"""
 
-from typing import Awaitable, TypeVar, Union
+from __future__ import annotations
+
+from collections.abc import Awaitable
+from typing import TypeAlias, TypeVar
 
 __all__ = ["AwaitableOrValue"]
 
 
 T = TypeVar("T")
 
-AwaitableOrValue = Union[Awaitable[T], T]
+AwaitableOrValue: TypeAlias = Awaitable[T] | T

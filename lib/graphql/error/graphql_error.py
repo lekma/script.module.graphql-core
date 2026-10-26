@@ -1,20 +1,20 @@
 """GraphQL Error"""
 
-from sys import exc_info
-from typing import Any, Collection, Dict, List, Optional, Union, TYPE_CHECKING
+from __future__ import annotations
 
-try:
-    from typing import TypedDict
-except ImportError:  # Python < 3.8
-    from typing_extensions import TypedDict
+from typing import TYPE_CHECKING, Any, TypeAlias, TypedDict
+
+from ..pyutils import Undefined
 
 if TYPE_CHECKING:
-    from ..language.ast import Node  # noqa: F401
+    from collections.abc import Collection
+
+    from ..language.ast import Node
     from ..language.location import (
-        SourceLocation,
         FormattedSourceLocation,
-    )  # noqa: F401
-    from ..language.source import Source  # noqa: F401
+        SourceLocation,
+    )
+    from ..language.source import Source
 
 __all__ = [
     "GraphQLError",
@@ -24,20 +24,24 @@ __all__ = [
 ]
 
 
-# Custom extensions
-GraphQLErrorExtensions = Dict[str, Any]
-# Use a unique identifier name for your extension, for example the name of
-# your library or project. Do not use a shortened identifier as this increases
-# the risk of conflicts. We recommend you add at most one extension key,
-# a dictionary which can contain all the values you need.
+GraphQLErrorExtensions: TypeAlias = dict[str, Any]
+"""Custom extensions
+
+Use a unique identifier name for your extension, for example the name of
+your library or project. Do not use a shortened identifier as this increases
+the risk of conflicts. We recommend you add at most one extension key,
+a dictionary which can contain all the values you need.
+"""
 
 
-# Custom formatted extensions
-GraphQLFormattedErrorExtensions = Dict[str, Any]
-# Use a unique identifier name for your extension, for example the name of
-# your library or project. Do not use a shortened identifier as this increases
-# the risk of conflicts. We recommend you add at most one extension key,
-# a dictionary which can contain all the values you need.
+GraphQLFormattedErrorExtensions: TypeAlias = dict[str, Any]
+"""Custom formatted extensions
+
+Use a unique identifier name for your extension, for example the name of
+your library or project. Do not use a shortened identifier as this increases
+the risk of conflicts. We recommend you add at most one extension key,
+a dictionary which can contain all the values you need.
+"""
 
 
 class GraphQLFormattedError(TypedDict, total=False):
@@ -53,14 +57,14 @@ class GraphQLFormattedError(TypedDict, total=False):
     except for purposes of localization.
     """
 
-    locations: List["FormattedSourceLocation"]
+    locations: list[FormattedSourceLocation]
     """Locations in the requested GraphQL document.
 
     If an error can be associated to a particular point in the requested GraphQL
     document, it should contain a list of locations.
     """
 
-    path: List[Union[str, int]]
+    path: list[str | int]
     """Path of the response field which experienced the error.
 
     If an error can be associated to a particular field in the GraphQL result, it
@@ -92,8 +96,11 @@ class GraphQLError(Exception):
         error.
     :param path: Response path where this error occurred during execution.
     :param original_error: Original error that caused this GraphQLError, if one
-        exists.
+        exists (deprecated, use ``cause`` instead).
     :param extensions: Extension fields to include in the formatted error.
+    :param cause: The cause of this error, if one exists. It is also exposed as the
+        standard exception :attr:`~BaseException.__cause__` when it is an exception.
+        Defaults to the ``original_error``.
 
     Create an error from AST nodes and response metadata:
 
@@ -135,6 +142,13 @@ class GraphQLError(Exception):
     >>> error.original_error is original_error
     True
 
+    The cause can also be passed with the ``cause`` argument; an exception cause is
+    exposed as the standard exception cause and as the original error:
+
+    >>> error = GraphQLError('Resolver failed.', cause=original_error)
+    >>> error.cause is error.__cause__ is error.original_error is original_error
+    True
+
     All arguments can also be passed positionally:
 
     >>> error = GraphQLError(
@@ -155,7 +169,7 @@ class GraphQLError(Exception):
     message: str
     """A message describing the Error for debugging purposes"""
 
-    locations: Optional[List["SourceLocation"]]
+    locations: list[SourceLocation] | None
     """Source locations
 
     A list of (line, column) locations within the source GraphQL document which
@@ -166,7 +180,7 @@ class GraphQLError(Exception):
     the field which produced the error.
     """
 
-    path: Optional[List[Union[str, int]]]
+    path: list[str | int] | None
     """Response path
 
     A list of field names and array indexes describing the JSON-path into the execution
@@ -175,38 +189,52 @@ class GraphQLError(Exception):
     Only included for errors during execution.
     """
 
-    nodes: Optional[List["Node"]]
+    nodes: list[Node] | None
     """A list of GraphQL AST Nodes corresponding to this error"""
 
-    source: Optional["Source"]
+    source: Source | None
     """The source GraphQL document for the first location of this error
 
     Note that if this Error represents more than one node, the source may not represent
     nodes after the first node.
     """
 
-    positions: Optional[Collection[int]]
+    positions: Collection[int] | None
     """Error positions
 
     A list of character offsets within the source GraphQL document which correspond
     to this error.
     """
 
-    original_error: Optional[Exception]
-    """Original error that caused this GraphQLError, if one exists"""
+    original_error: Exception | None
+    """Original error that caused this GraphQLError, if one exists
 
-    extensions: Optional[GraphQLErrorExtensions]
+    .. deprecated:: 3.3
+        Use :attr:`cause` instead to better align with the standard exception
+        :attr:`~BaseException.__cause__`.
+    """
+
+    cause: Any
+    """The cause of this error, if one exists
+
+    The value passed as the ``cause`` when creating this error. Adopts the
+    convention of the standard exception cause and is also exposed as the
+    :attr:`~BaseException.__cause__` when it is an exception.
+    """
+
+    extensions: GraphQLErrorExtensions | None
     """Extension fields to add to the formatted error"""
 
     __slots__ = (
+        "cause",
+        "extensions",
+        "locations",
         "message",
         "nodes",
-        "source",
-        "positions",
-        "locations",
-        "path",
         "original_error",
-        "extensions",
+        "path",
+        "positions",
+        "source",
     )
 
     __hash__ = Exception.__hash__
@@ -214,20 +242,33 @@ class GraphQLError(Exception):
     def __init__(
         self,
         message: str,
-        nodes: Union[Collection["Node"], "Node", None] = None,
-        source: Optional["Source"] = None,
-        positions: Optional[Collection[int]] = None,
-        path: Optional[Collection[Union[str, int]]] = None,
-        original_error: Optional[Exception] = None,
-        extensions: Optional[GraphQLErrorExtensions] = None,
+        nodes: Collection[Node] | Node | None = None,
+        source: Source | None = None,
+        positions: Collection[int] | None = None,
+        path: Collection[str | int] | None = None,
+        original_error: Exception | None = None,
+        extensions: GraphQLErrorExtensions | None = None,
+        cause: Any = Undefined,
     ) -> None:
+        """Initialize a GraphQLError."""
         super().__init__(message)
         self.message = message
+
+        # The cause defaults to the (deprecated) original error when not given.
+        has_cause = cause is not Undefined
+        self.cause = cause if has_cause else original_error
 
         if path and not isinstance(path, list):
             path = list(path)
         self.path = path or None  # type: ignore
-        self.original_error = original_error
+
+        # An Error provided as the cause is also exposed as the original error
+        # for backward compatibility.
+        cause_value = cause if has_cause else None
+        underlying_error = original_error
+        if underlying_error is None and isinstance(cause_value, Exception):
+            underlying_error = cause_value
+        self.original_error = underlying_error
 
         # Compute list of blame nodes.
         if nodes and not isinstance(nodes, list):
@@ -241,32 +282,39 @@ class GraphQLError(Exception):
         self.source = source
         if not source and node_locations:
             loc = node_locations[0]
-            if loc.source:  # pragma: no cover else
+            if loc.source:  # pragma: no branch
                 self.source = loc.source
         if not positions and node_locations:
             positions = [loc.start for loc in node_locations]
         self.positions = positions or None
         if positions and source:
-            locations: Optional[List["SourceLocation"]] = [
+            locations: list[SourceLocation] | None = [
                 source.get_location(pos) for pos in positions
             ]
         else:
             locations = [loc.source.get_location(loc.start) for loc in node_locations]
         self.locations = locations or None
 
+        # Adopt the cause as the standard exception cause when it is one, so
+        # that the cause chain is reported without duplicating the traceback.
+        if isinstance(cause_value, BaseException):
+            self.__cause__ = cause_value
+
+        # Preserve the traceback of an explicit original error. The traceback of
+        # a cause is not copied over, since Python already reports cause chains.
         if original_error:
             self.__traceback__ = original_error.__traceback__
-            if original_error.__cause__:
-                self.__cause__ = original_error.__cause__
-            elif original_error.__context__:
-                self.__context__ = original_error.__context__
-            if extensions is None:
-                original_extensions = getattr(original_error, "extensions", None)
-                if isinstance(original_extensions, dict):
-                    extensions = original_extensions
+            if not self.__cause__:
+                if original_error.__cause__:
+                    self.__cause__ = original_error.__cause__
+                elif original_error.__context__:
+                    self.__context__ = original_error.__context__
+
+        if extensions is None and underlying_error is not None:
+            original_extensions = getattr(underlying_error, "extensions", None)
+            if isinstance(original_extensions, dict):
+                extensions = original_extensions
         self.extensions = extensions or {}
-        if not self.__traceback__:
-            self.__traceback__ = exc_info()[2]
 
     def __str__(self) -> str:
         """Get this error as a human-readable message with source locations.
@@ -290,13 +338,12 @@ class GraphQLError(Exception):
         output = [self.message]
 
         if self.nodes:
-            for node in self.nodes:
-                if node.loc:
-                    output.append(print_location(node.loc))
+            output.extend(print_location(node.loc) for node in self.nodes if node.loc)
         elif self.source and self.locations:
             source = self.source
-            for location in self.locations:
-                output.append(print_source_location(source, location))
+            output.extend(
+                print_source_location(source, location) for location in self.locations
+            )
 
         return "\n\n".join(output)
 
@@ -310,14 +357,14 @@ class GraphQLError(Exception):
             args.append(f"extensions={self.extensions!r}")
         return f"{self.__class__.__name__}({', '.join(args)})"
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, GraphQLError)
             and self.__class__ == other.__class__
             and all(
                 getattr(self, slot) == getattr(other, slot)
                 for slot in self.__slots__
-                if slot != "original_error"
+                if slot not in ("cause", "original_error")
             )
         ) or (
             isinstance(other, dict)
@@ -325,11 +372,11 @@ class GraphQLError(Exception):
             and all(
                 slot in self.__slots__ and getattr(self, slot) == other.get(slot)
                 for slot in other
-                if slot != "original_error"
+                if slot not in ("cause", "original_error")
             )
         )
 
-    def __ne__(self, other: Any) -> bool:
+    def __ne__(self, other: object) -> bool:
         return not self == other
 
     @property
@@ -359,50 +406,3 @@ class GraphQLError(Exception):
         if self.extensions:
             formatted["extensions"] = self.extensions
         return formatted
-
-
-def print_error(error: GraphQLError) -> str:
-    """Print a GraphQLError to a string.
-
-    Represents useful location information about the error's position in the source.
-    This deprecated helper is retained for backwards compatibility; call ``str(error)``
-    instead because ``print_error`` will be removed in v3.3.
-
-    :param error: The error to format.
-    :returns: The printed string representation.
-
-    >>> from graphql import GraphQLError
-    >>> from graphql.error.graphql_error import print_error
-    >>> print_error(GraphQLError('Example error'))
-    'Example error'
-
-    .. deprecated:: 3.2
-       Please use ``str(error)`` instead. Will be removed in v3.3.
-    """
-    if not isinstance(error, GraphQLError):
-        raise TypeError("Expected a GraphQLError.")
-    return str(error)
-
-
-def format_error(error: GraphQLError) -> GraphQLFormattedError:
-    """Format a GraphQL error.
-
-    Given a GraphQLError, format it according to the rules described by the "Response
-    Format, Errors" section of the GraphQL Specification. This deprecated helper is
-    retained for backwards compatibility; use ``error.formatted`` instead because
-    ``format_error`` will be removed in v3.3.
-
-    :param error: The error to format.
-    :returns: The JSON-serializable formatted error.
-
-    >>> from graphql import GraphQLError
-    >>> from graphql.error.graphql_error import format_error
-    >>> format_error(GraphQLError('Example error'))
-    {'message': 'Example error'}
-
-    .. deprecated:: 3.2
-       Please use ``error.formatted`` instead. Will be removed in v3.3.
-    """
-    if not isinstance(error, GraphQLError):
-        raise TypeError("Expected a GraphQLError.")
-    return error.formatted

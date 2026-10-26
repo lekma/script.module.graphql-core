@@ -1,20 +1,28 @@
 """Located GraphQL Error"""
 
-from typing import TYPE_CHECKING, Collection, Optional, Union
+from __future__ import annotations
 
+from contextlib import suppress
+from typing import TYPE_CHECKING
+
+from ..language.source import Source, is_source
 from ..pyutils import inspect
 from .graphql_error import GraphQLError
 
 if TYPE_CHECKING:
-    from ..language.ast import Node  # noqa: F401
+    from collections.abc import Collection
+
+    from ..language.ast import Node
 
 __all__ = ["located_error"]
+
+suppress_attribute_error = suppress(AttributeError)
 
 
 def located_error(
     original_error: Exception,
-    nodes: Optional[Union["None", Collection["Node"]]] = None,
-    path: Optional[Collection[Union[str, int]]] = None,
+    nodes: Collection[Node] | None = None,
+    path: Collection[str | int] | None = None,
 ) -> GraphQLError:
     """Located GraphQL Error
 
@@ -46,23 +54,20 @@ def located_error(
     if isinstance(original_error, GraphQLError) and original_error.path is not None:
         return original_error
     try:
-        # noinspection PyUnresolvedReferences
         message = str(original_error.message)  # type: ignore
     except AttributeError:
         message = str(original_error)
     try:
-        # noinspection PyUnresolvedReferences
         source = original_error.source  # type: ignore
+        if not is_source(source):
+            source = Source(source) if isinstance(source, str) else None
     except AttributeError:
         source = None
     try:
-        # noinspection PyUnresolvedReferences
         positions = original_error.positions  # type: ignore
     except AttributeError:
         positions = None
-    try:
-        # noinspection PyUnresolvedReferences
+
+    with suppress_attribute_error:
         nodes = original_error.nodes or nodes  # type: ignore
-    except AttributeError:
-        pass
     return GraphQLError(message, nodes, source, positions, path, original_error)

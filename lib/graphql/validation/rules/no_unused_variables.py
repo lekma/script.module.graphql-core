@@ -1,10 +1,14 @@
 """No unused variables rule"""
 
-from typing import Any, List, Set
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from ...error import GraphQLError
-from ...language import OperationDefinitionNode, VariableDefinitionNode
-from . import ValidationContext, ValidationRule
+from . import ValidationRule
+
+if TYPE_CHECKING:
+    from ...language import FragmentDefinitionNode, OperationDefinitionNode
 
 __all__ = ["NoUnusedVariablesRule"]
 
@@ -31,16 +35,25 @@ class NoUnusedVariablesRule(ValidationRule):
     []
     """
 
-    def __init__(self, context: ValidationContext):
-        super().__init__(context)
-        self.variable_defs: List[VariableDefinitionNode] = []
-
-    def enter_operation_definition(self, *_args: Any) -> None:
-        """Called when entering an operation definition node.
+    def leave_fragment_definition(
+        self, fragment: FragmentDefinitionNode, *_args: Any
+    ) -> None:
+        """Called when leaving a fragment definition node.
 
         :meta private:
         """
-        self.variable_defs.clear()
+        usages = self.context.get_variable_usages(fragment)
+        argument_name_used = {usage.node.name.value for usage in usages}
+        for var_def in fragment.variable_definitions or ():
+            arg_name = var_def.variable.name.value
+            if arg_name not in argument_name_used:
+                self.report_error(
+                    GraphQLError(
+                        f"Variable '${arg_name}' is never used"
+                        f" in fragment '{fragment.name.value}'.",
+                        var_def,
+                    )
+                )
 
     def leave_operation_definition(
         self, operation: OperationDefinitionNode, *_args: Any
@@ -49,32 +62,22 @@ class NoUnusedVariablesRule(ValidationRule):
 
         :meta private:
         """
-        variable_name_used: Set[str] = set()
+        operation_variable_name_used: set[str] = set()
         usages = self.context.get_recursive_variable_usages(operation)
 
         for usage in usages:
-            variable_name_used.add(usage.node.name.value)
+            if not usage.fragment_variable_definition:
+                operation_variable_name_used.add(usage.node.name.value)
 
-        for variable_def in self.variable_defs:
+        for variable_def in operation.variable_definitions or ():
             variable_name = variable_def.variable.name.value
-            if variable_name not in variable_name_used:
+            if variable_name not in operation_variable_name_used:
                 self.report_error(
                     GraphQLError(
-                        (
-                            f"Variable '${variable_name}' is never used"
-                            f" in operation '{operation.name.value}'."
-                            if operation.name
-                            else f"Variable '${variable_name}' is never used."
-                        ),
+                        f"Variable '${variable_name}' is never used"
+                        f" in operation '{operation.name.value}'."
+                        if operation.name
+                        else f"Variable '${variable_name}' is never used.",
                         variable_def,
                     )
                 )
-
-    def enter_variable_definition(
-        self, definition: VariableDefinitionNode, *_args: Any
-    ) -> None:
-        """Called when entering a variable definition node.
-
-        :meta private:
-        """
-        self.variable_defs.append(definition)

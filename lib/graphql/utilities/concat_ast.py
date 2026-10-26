@@ -1,9 +1,14 @@
 """AST concatenation"""
 
+from __future__ import annotations
+
 from itertools import chain
-from typing import Collection
+from typing import TYPE_CHECKING
 
 from ..language.ast import DocumentNode
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
 
 __all__ = ["concat_ast"]
 
@@ -24,6 +29,5 @@ def concat_ast(asts: Collection[DocumentNode]) -> DocumentNode:
     >>> len(document.definitions)
     2
     """
-    return DocumentNode(
-        definitions=list(chain.from_iterable(document.definitions for document in asts))
-    )
+    all_definitions = chain.from_iterable(doc.definitions for doc in asts)
+    return DocumentNode(definitions=tuple(all_definitions))

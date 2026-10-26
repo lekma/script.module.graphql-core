@@ -1,6 +1,8 @@
 """Resolve schema coordinates"""
 
-from typing import NamedTuple, Optional, Union
+from __future__ import annotations
+
+from typing import NamedTuple, TypeAlias
 
 from ..language import (
     ArgumentCoordinateNode,
@@ -28,16 +30,16 @@ from ..type import (
 )
 
 __all__ = [
-    "resolve_schema_coordinate",
-    "resolve_ast_schema_coordinate",
-    "ResolvedNamedType",
-    "ResolvedField",
-    "ResolvedInputField",
-    "ResolvedEnumValue",
-    "ResolvedFieldArgument",
     "ResolvedDirective",
     "ResolvedDirectiveArgument",
+    "ResolvedEnumValue",
+    "ResolvedField",
+    "ResolvedFieldArgument",
+    "ResolvedInputField",
+    "ResolvedNamedType",
     "ResolvedSchemaElement",
+    "resolve_ast_schema_coordinate",
+    "resolve_schema_coordinate",
 ]
 
 
@@ -53,7 +55,7 @@ class ResolvedNamedType(NamedTuple):
 class ResolvedField(NamedTuple):
     """A field resolved from a schema coordinate."""
 
-    type: Union[GraphQLObjectType, GraphQLInterfaceType]
+    type: GraphQLObjectType | GraphQLInterfaceType
     """The object or interface type that declares the field."""
     field: GraphQLField
     """The resolved field."""
@@ -86,7 +88,7 @@ class ResolvedEnumValue(NamedTuple):
 class ResolvedFieldArgument(NamedTuple):
     """A field argument resolved from a schema coordinate."""
 
-    type: Union[GraphQLObjectType, GraphQLInterfaceType]
+    type: GraphQLObjectType | GraphQLInterfaceType
     """The object or interface type that declares the field."""
     field: GraphQLField
     """The field that declares the argument."""
@@ -116,20 +118,21 @@ class ResolvedDirectiveArgument(NamedTuple):
     """The kind of the resolved schema element."""
 
 
-ResolvedSchemaElement = Union[
-    ResolvedNamedType,
-    ResolvedField,
-    ResolvedInputField,
-    ResolvedEnumValue,
-    ResolvedFieldArgument,
-    ResolvedDirective,
-    ResolvedDirectiveArgument,
-]
+ResolvedSchemaElement: TypeAlias = (
+    ResolvedNamedType
+    | ResolvedField
+    | ResolvedInputField
+    | ResolvedEnumValue
+    | ResolvedFieldArgument
+    | ResolvedDirective
+    | ResolvedDirectiveArgument
+)
+"""A schema element resolved from a schema coordinate."""
 
 
 def resolve_schema_coordinate(
-    schema: GraphQLSchema, schema_coordinate: Union[str, Source]
-) -> Optional[ResolvedSchemaElement]:
+    schema: GraphQLSchema, schema_coordinate: str | Source
+) -> ResolvedSchemaElement | None:
     """Resolve a string schema coordinate in the context of a GraphQL schema.
 
     A schema coordinate is resolved in the context of a GraphQL schema to uniquely
@@ -184,7 +187,7 @@ def resolve_schema_coordinate(
 
 def resolve_type_coordinate(
     schema: GraphQLSchema, schema_coordinate: TypeCoordinateNode
-) -> Optional[ResolvedNamedType]:
+) -> ResolvedNamedType | None:
     """TypeCoordinate : Name"""
     # 1. Let {typeName} be the value of {Name}.
     type_name = schema_coordinate.name.value
@@ -199,7 +202,7 @@ def resolve_type_coordinate(
 
 def resolve_member_coordinate(
     schema: GraphQLSchema, schema_coordinate: MemberCoordinateNode
-) -> Optional[Union[ResolvedField, ResolvedInputField, ResolvedEnumValue]]:
+) -> ResolvedField | ResolvedInputField | ResolvedEnumValue | None:
     """MemberCoordinate : Name . Name"""
     # 1. Let {typeName} be the value of the first {Name}.
     # 2. Let {type} be the type in the {schema} named {typeName}.
@@ -209,9 +212,8 @@ def resolve_member_coordinate(
     # 3. Assert: {type} must exist, and must be an Enum, Input Object, Object or
     #    Interface type.
     if type_ is None:
-        raise TypeError(
-            f"Expected {inspect(type_name)} to be defined as a type in the schema."
-        )
+        msg = f"Expected {inspect(type_name)} to be defined as a type in the schema."
+        raise TypeError(msg)
     if not isinstance(
         type_,
         (
@@ -221,10 +223,11 @@ def resolve_member_coordinate(
             GraphQLInterfaceType,
         ),
     ):
-        raise TypeError(
+        msg = (
             f"Expected {inspect(type_name)}"
             " to be an Enum, Input Object, Object or Interface type."
         )
+        raise TypeError(msg)
 
     member_name = schema_coordinate.member_name.value
 
@@ -249,7 +252,7 @@ def resolve_member_coordinate(
     # 6. Otherwise:
     # 1. Let {fieldName} be the value of the second {Name}.
     # 2. Return the field of {type} named {fieldName} if it exists.
-    field = type_.fields.get(member_name)
+    field = schema.get_field(type_, member_name)
     if field is None:
         return None
     return ResolvedField(type_, field)
@@ -257,7 +260,7 @@ def resolve_member_coordinate(
 
 def resolve_argument_coordinate(
     schema: GraphQLSchema, schema_coordinate: ArgumentCoordinateNode
-) -> Optional[ResolvedFieldArgument]:
+) -> ResolvedFieldArgument | None:
     """ArgumentCoordinate : Name . Name ( Name : )"""
     # 1. Let {typeName} be the value of the first {Name}.
     # 2. Let {type} be the type in the {schema} named {typeName}.
@@ -266,25 +269,24 @@ def resolve_argument_coordinate(
 
     # 3. Assert: {type} must exist, and be an Object or Interface type.
     if type_ is None:
-        raise TypeError(
-            f"Expected {inspect(type_name)} to be defined as a type in the schema."
-        )
+        msg = f"Expected {inspect(type_name)} to be defined as a type in the schema."
+        raise TypeError(msg)
     if not isinstance(type_, (GraphQLObjectType, GraphQLInterfaceType)):
-        raise TypeError(
-            f"Expected {inspect(type_name)} to be an object type or interface type."
-        )
+        msg = f"Expected {inspect(type_name)} to be an object type or interface type."
+        raise TypeError(msg)
 
     # 4. Let {fieldName} be the value of the second {Name}.
     # 5. Let {field} be the field of {type} named {fieldName}.
     field_name = schema_coordinate.field_name.value
-    field = type_.fields.get(field_name)
+    field = schema.get_field(type_, field_name)
 
     # 6. Assert: {field} must exist.
     if field is None:
-        raise TypeError(
+        msg = (
             f"Expected {inspect(field_name)} to exist as a field"
             f" of type {inspect(type_name)} in the schema."
         )
+        raise TypeError(msg)
 
     # 7. Let {fieldArgumentName} be the value of the third {Name}.
     field_argument_name = schema_coordinate.argument_name.value
@@ -299,7 +301,7 @@ def resolve_argument_coordinate(
 
 def resolve_directive_coordinate(
     schema: GraphQLSchema, schema_coordinate: DirectiveCoordinateNode
-) -> Optional[ResolvedDirective]:
+) -> ResolvedDirective | None:
     """DirectiveCoordinate : @ Name"""
     # 1. Let {directiveName} be the value of {Name}.
     directive_name = schema_coordinate.name.value
@@ -314,7 +316,7 @@ def resolve_directive_coordinate(
 
 def resolve_directive_argument_coordinate(
     schema: GraphQLSchema, schema_coordinate: DirectiveArgumentCoordinateNode
-) -> Optional[ResolvedDirectiveArgument]:
+) -> ResolvedDirectiveArgument | None:
     """DirectiveArgumentCoordinate : @ Name ( Name : )"""
     # 1. Let {directiveName} be the value of the first {Name}.
     # 2. Let {directive} be the directive in the {schema} named {directiveName}.
@@ -323,10 +325,11 @@ def resolve_directive_argument_coordinate(
 
     # 3. Assert {directive} must exist.
     if directive is None:
-        raise TypeError(
+        msg = (
             f"Expected {inspect(directive_name)}"
             " to be defined as a directive in the schema."
         )
+        raise TypeError(msg)
 
     # 4. Let {directiveArgumentName} be the value of the second {Name}.
     directive_argument_name = schema_coordinate.argument_name.value
@@ -341,7 +344,7 @@ def resolve_directive_argument_coordinate(
 
 def resolve_ast_schema_coordinate(
     schema: GraphQLSchema, schema_coordinate: SchemaCoordinateNode
-) -> Optional[ResolvedSchemaElement]:
+) -> ResolvedSchemaElement | None:
     """Resolve schema coordinate from a parsed SchemaCoordinate node.
 
     :param schema: The GraphQL schema to use.

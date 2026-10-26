@@ -1,12 +1,19 @@
 """Managing type information"""
 
-from typing import Any, Callable, List, Optional, Union, cast
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any, NamedTuple, TypeAlias
 
 from ..language import (
     ArgumentNode,
     DirectiveNode,
+    DocumentNode,
     EnumValueNode,
     FieldNode,
+    FragmentArgumentNode,
+    FragmentDefinitionNode,
+    FragmentSpreadNode,
     InlineFragmentNode,
     ListValueNode,
     Node,
@@ -21,39 +28,35 @@ from ..type import (
     GraphQLArgument,
     GraphQLCompositeType,
     GraphQLDirective,
-    GraphQLEnumType,
     GraphQLEnumValue,
     GraphQLField,
-    GraphQLInputObjectType,
     GraphQLInputType,
-    GraphQLInterfaceType,
-    GraphQLList,
-    GraphQLObjectType,
     GraphQLOutputType,
     GraphQLSchema,
     GraphQLType,
-    is_composite_type,
-    is_input_type,
-    is_output_type,
     get_named_type,
-    SchemaMetaFieldDef,
-    TypeMetaFieldDef,
-    TypeNameMetaFieldDef,
-    is_object_type,
-    is_interface_type,
     get_nullable_type,
-    is_list_type,
-    is_input_object_type,
+    is_composite_type,
     is_enum_type,
+    is_input_object_type,
+    is_input_type,
+    is_list_type,
+    is_object_type,
+    is_output_type,
 )
 from .type_from_ast import type_from_ast
 
-__all__ = ["TypeInfo", "TypeInfoVisitor"]
+__all__ = ["FragmentSignature", "TypeInfo", "TypeInfoVisitor"]
 
 
-GetFieldDefFn = Callable[
-    [GraphQLSchema, GraphQLType, FieldNode], Optional[GraphQLField]
-]
+FragmentSignatureByNameFn: TypeAlias = Callable[[str], "FragmentSignature | None"]
+
+
+class FragmentSignature(NamedTuple):
+    """A fragment definition with the variable definitions of its arguments."""
+
+    definition: FragmentDefinitionNode
+    variable_definitions: dict[str, VariableDefinitionNode]
 
 
 class TypeInfo:
@@ -66,11 +69,10 @@ class TypeInfo:
 
     :param schema: Schema used for type lookups.
     :param initial_type: Optional type to use at the start of traversal. It may be
-        provided in rare cases to facilitate traversals beginning somewhere other than
-        documents.
-    :param get_field_def_fn: Optional field definition lookup override. This parameter
-        is deprecated; omit it so that TypeInfo uses its built-in field definition
-        lookup. It will be removed in v3.3.
+        provided in rare cases to facilitate traversals beginning somewhere other
+        than documents.
+    :param fragment_signatures: Optional function returning the signatures of the
+        fragments available during traversal by fragment name.
 
     Track field types during a traversal with a :class:`TypeInfoVisitor`:
 
@@ -84,52 +86,82 @@ class TypeInfo:
     >>> type_info = TypeInfo(schema)
     >>> seen_types = []
     >>> class FieldVisitor(Visitor):
-    ...     def enter_field(self, node, *_args):
+    ...     def enter_field(self, *_args):
     ...         seen_types.append(str(type_info.get_type()))
     >>> _ = visit(parse('{ greeting }'), TypeInfoVisitor(type_info, FieldVisitor()))
     >>> seen_types
     ['String']
 
-    This variant starts from an initial type and supplies a field definition resolver:
+    This variant starts from an initial type and supplies fragment signatures:
 
-    >>> from graphql import FieldNode, GraphQLField, GraphQLString, NameNode
-    >>> from graphql import SelectionSetNode
-    >>> virtual_greeting = GraphQLField(GraphQLString)
+    >>> from graphql import FragmentSpreadNode, NameNode, SelectionSetNode
+    >>> from graphql.utilities.type_info import FragmentSignature
+    >>> schema = build_schema('''
+    ...     type Query {
+    ...       greeting(name: String): String
+    ...     }
+    ... ''')
+    >>> fragment_document = parse(
+    ...     'fragment GreetingFields($name: String) on Query { greeting(name: $name) }',
+    ...     experimental_fragment_arguments=True,
+    ... )
+    >>> fragment_definition = fragment_document.definitions[0]
+    >>> variable_definition = fragment_definition.variable_definitions[0]
     >>> type_info = TypeInfo(
-    ...     schema, schema.query_type, lambda *_args: virtual_greeting)
+    ...     schema,
+    ...     schema.query_type,
+    ...     lambda name: FragmentSignature(
+    ...         fragment_definition, {'name': variable_definition}
+    ...     )
+    ...     if name == 'GreetingFields'
+    ...     else None,
+    ... )
     >>> type_info.enter(SelectionSetNode(selections=()))
-    >>> type_info.enter(FieldNode(name=NameNode(value='ignored')))
-    >>> type_info.get_field_def() is virtual_greeting
-    True
-    >>> str(type_info.get_type())
-    'String'
+    >>> type_info.enter(
+    ...     FragmentSpreadNode(
+    ...         name=NameNode(value='GreetingFields'), arguments=(), directives=()
+    ...     )
+    ... )
+    >>> str(type_info.get_parent_type())
+    'Query'
+    >>> type_info.get_fragment_signature().definition.name.value
+    'GreetingFields'
     """
 
     def __init__(
         self,
         schema: GraphQLSchema,
-        initial_type: Optional[GraphQLType] = None,
-        get_field_def_fn: Optional[GetFieldDefFn] = None,
+        initial_type: GraphQLType | None = None,
+        fragment_signatures: FragmentSignatureByNameFn | None = None,
     ) -> None:
+        """Initialize the TypeInfo for the given GraphQL schema.
+
+        Initial type may be provided in rare cases to facilitate traversals beginning
+        somewhere other than documents.
+        """
         self._schema = schema
-        self._type_stack: List[Optional[GraphQLOutputType]] = []
-        self._parent_type_stack: List[Optional[GraphQLCompositeType]] = []
-        self._input_type_stack: List[Optional[GraphQLInputType]] = []
-        self._field_def_stack: List[Optional[GraphQLField]] = []
-        self._default_value_stack: List[Any] = []
-        self._directive: Optional[GraphQLDirective] = None
-        self._argument: Optional[GraphQLArgument] = None
-        self._enum_value: Optional[GraphQLEnumValue] = None
-        self._get_field_def: GetFieldDefFn = get_field_def_fn or get_field_def
+        self._type_stack: list[GraphQLOutputType | None] = []
+        self._parent_type_stack: list[GraphQLCompositeType | None] = []
+        self._input_type_stack: list[GraphQLInputType | None] = []
+        self._field_def_stack: list[GraphQLField | None] = []
+        self._default_value_stack: list[Any] = []
+        self._directive: GraphQLDirective | None = None
+        self._argument: GraphQLArgument | None = None
+        self._enum_value: GraphQLEnumValue | None = None
+        self._fragment_signatures_by_name: FragmentSignatureByNameFn = (
+            fragment_signatures or (lambda _fragment_name: None)
+        )
+        self._fragment_signature: FragmentSignature | None = None
+        self._fragment_argument: VariableDefinitionNode | None = None
         if initial_type:
             if is_input_type(initial_type):
-                self._input_type_stack.append(cast(GraphQLInputType, initial_type))
+                self._input_type_stack.append(initial_type)
             if is_composite_type(initial_type):
-                self._parent_type_stack.append(cast(GraphQLCompositeType, initial_type))
+                self._parent_type_stack.append(initial_type)
             if is_output_type(initial_type):
-                self._type_stack.append(cast(GraphQLOutputType, initial_type))
+                self._type_stack.append(initial_type)
 
-    def get_type(self) -> Optional[GraphQLOutputType]:
+    def get_type(self) -> GraphQLOutputType | None:
         """Get the current output type at this point in traversal.
 
         :returns: The current output type, if known.
@@ -159,7 +191,7 @@ class TypeInfo:
             return self._type_stack[-1]
         return None
 
-    def get_parent_type(self) -> Optional[GraphQLCompositeType]:
+    def get_parent_type(self) -> GraphQLCompositeType | None:
         """Get the current parent composite type.
 
         :returns: The current parent composite type, if known.
@@ -189,7 +221,7 @@ class TypeInfo:
             return self._parent_type_stack[-1]
         return None
 
-    def get_input_type(self) -> Optional[GraphQLInputType]:
+    def get_input_type(self) -> GraphQLInputType | None:
         """Get the current input type at this point in traversal.
 
         :returns: The current input type, if known.
@@ -220,7 +252,9 @@ class TypeInfo:
             return self._input_type_stack[-1]
         return None
 
-    def get_parent_input_type(self) -> Optional[GraphQLInputType]:
+    # Note: continues to expose the closest enclosing valid input type if
+    # traversal descends into syntax with no corresponding GraphQL input type.
+    def get_parent_input_type(self) -> GraphQLInputType | None:
         """Get the parent input type for the current input position.
 
         :returns: The parent input type, if known.
@@ -251,7 +285,7 @@ class TypeInfo:
             return self._input_type_stack[-2]
         return None
 
-    def get_field_def(self) -> Optional[GraphQLField]:
+    def get_field_def(self) -> GraphQLField | None:
         """Get the current field definition.
 
         :returns: The current field definition, if known.
@@ -296,14 +330,15 @@ class TypeInfo:
         ...         default_values.append(type_info.get_default_value())
         >>> document = parse('{ reviews(limit: 5) }')
         >>> _ = visit(document, TypeInfoVisitor(type_info, ArgumentVisitor()))
-        >>> default_values
-        [10]
+        >>> from graphql import print_ast
+        >>> [print_ast(default.literal) for default in default_values]
+        ['10']
         """
         if self._default_value_stack:
             return self._default_value_stack[-1]
         return None
 
-    def get_directive(self) -> Optional[GraphQLDirective]:
+    def get_directive(self) -> GraphQLDirective | None:
         """Get the current directive definition.
 
         :returns: The current directive definition, if known.
@@ -327,7 +362,7 @@ class TypeInfo:
         """
         return self._directive
 
-    def get_argument(self) -> Optional[GraphQLArgument]:
+    def get_argument(self) -> GraphQLArgument | None:
         """Get the current argument definition.
 
         :returns: The current argument definition, if known.
@@ -351,7 +386,109 @@ class TypeInfo:
         """
         return self._argument
 
-    def get_enum_value(self) -> Optional[GraphQLEnumValue]:
+    def get_fragment_signature(self) -> FragmentSignature | None:
+        """Get the current fragment signature.
+
+        :returns: The fragment signature for the current fragment spread.
+
+        >>> from graphql import (
+        ...     TypeInfo, TypeInfoVisitor, Visitor, build_schema, parse, visit)
+        >>> schema = build_schema('''
+        ...     type Query {
+        ...       greeting: String
+        ...     }
+        ... ''')
+        >>> document = parse('''
+        ...     {
+        ...       ...GreetingFields
+        ...     }
+        ...
+        ...     fragment GreetingFields on Query {
+        ...       greeting
+        ...     }
+        ... ''', experimental_fragment_arguments=True)
+        >>> type_info = TypeInfo(schema)
+        >>> fragment_names = []
+        >>> class FragmentSpreadVisitor(Visitor):
+        ...     def enter_fragment_spread(self, *_args):
+        ...         signature = type_info.get_fragment_signature()
+        ...         fragment_names.append(signature.definition.name.value)
+        >>> _ = visit(document, TypeInfoVisitor(type_info, FragmentSpreadVisitor()))
+        >>> fragment_names
+        ['GreetingFields']
+        """
+        return self._fragment_signature
+
+    def get_fragment_signature_by_name(self) -> FragmentSignatureByNameFn:
+        """Get the function used to look up fragment signatures by name.
+
+        :returns: A function that maps fragment names to fragment signatures.
+
+        >>> from graphql import (
+        ...     TypeInfo, TypeInfoVisitor, Visitor, build_schema, parse, visit)
+        >>> schema = build_schema('''
+        ...     type Query {
+        ...       greeting: String
+        ...     }
+        ... ''')
+        >>> document = parse('''
+        ...     {
+        ...       ...GreetingFields
+        ...     }
+        ...
+        ...     fragment GreetingFields on Query {
+        ...       greeting
+        ...     }
+        ... ''', experimental_fragment_arguments=True)
+        >>> type_info = TypeInfo(schema)
+        >>> fragment_names = []
+        >>> class DocumentVisitor(Visitor):
+        ...     def enter_document(self, *_args):
+        ...         get_fragment_signature = type_info.get_fragment_signature_by_name()
+        ...         signature = get_fragment_signature('GreetingFields')
+        ...         fragment_names.append(signature.definition.name.value)
+        >>> _ = visit(document, TypeInfoVisitor(type_info, DocumentVisitor()))
+        >>> fragment_names
+        ['GreetingFields']
+        """
+        return self._fragment_signatures_by_name
+
+    def get_fragment_argument(self) -> VariableDefinitionNode | None:
+        """Get the current fragment argument definition.
+
+        :returns: The variable definition for the current fragment argument.
+
+        >>> from graphql import (
+        ...     TypeInfo, TypeInfoVisitor, Visitor, build_schema, parse, visit)
+        >>> schema = build_schema('''
+        ...     type Query {
+        ...       greeting(name: String): String
+        ...     }
+        ... ''')
+        >>> document = parse('''
+        ...     {
+        ...       ...GreetingFields(name: "Ada")
+        ...     }
+        ...
+        ...     fragment GreetingFields($name: String) on Query {
+        ...       greeting(name: $name)
+        ...     }
+        ... ''', experimental_fragment_arguments=True)
+        >>> type_info = TypeInfo(schema)
+        >>> argument_names = []
+        >>> class FragmentArgumentVisitor(Visitor):
+        ...     def enter_fragment_argument(self, *_args):
+        ...         argument = type_info.get_fragment_argument()
+        ...         argument_names.append(argument.variable.name.value)
+        >>> _ = visit(
+        ...     document, TypeInfoVisitor(type_info, FragmentArgumentVisitor())
+        ... )
+        >>> argument_names
+        ['name']
+        """
+        return self._fragment_argument
+
+    def get_enum_value(self) -> GraphQLEnumValue | None:
         """Get the current enum value definition.
 
         :returns: The current enum value definition, if known.
@@ -439,17 +576,21 @@ class TypeInfo:
         if method:
             method()
 
-    # noinspection PyUnusedLocal
-    def enter_selection_set(self, node: SelectionSetNode) -> None:
+    def enter_document(self, node: DocumentNode) -> None:
+        """Update this TypeInfo instance for an entered document node.
+
+        :meta private:
+        """
+        self._fragment_signatures_by_name = get_fragment_signatures(node).get
+
+    def enter_selection_set(self, _node: SelectionSetNode) -> None:
         """Update this TypeInfo instance for an entered selection set node.
 
         :meta private:
         """
         named_type = get_named_type(self.get_type())
         self._parent_type_stack.append(
-            cast(GraphQLCompositeType, named_type)
-            if is_composite_type(named_type)
-            else None
+            named_type if is_composite_type(named_type) else None
         )
 
     def enter_field(self, node: FieldNode) -> None:
@@ -459,7 +600,7 @@ class TypeInfo:
         """
         parent_type = self.get_parent_type()
         if parent_type:
-            field_def = self._get_field_def(self._schema, parent_type, node)
+            field_def = self._schema.get_field(parent_type, node.name.value)
             field_type = field_def.type if field_def else None
         else:
             field_def = field_type = None
@@ -481,6 +622,15 @@ class TypeInfo:
         root_type = self._schema.get_root_type(node.operation)
         self._type_stack.append(root_type if is_object_type(root_type) else None)
 
+    def enter_fragment_spread(self, node: FragmentSpreadNode) -> None:
+        """Update this TypeInfo instance for an entered fragment spread node.
+
+        :meta private:
+        """
+        self._fragment_signature = self.get_fragment_signature_by_name()(
+            node.name.value
+        )
+
     def enter_inline_fragment(self, node: InlineFragmentNode) -> None:
         """Update this TypeInfo instance for an entered (inline) fragment.
 
@@ -492,11 +642,7 @@ class TypeInfo:
             if type_condition_ast
             else get_named_type(self.get_type())
         )
-        self._type_stack.append(
-            cast(GraphQLOutputType, output_type)
-            if is_output_type(output_type)
-            else None
-        )
+        self._type_stack.append(output_type if is_output_type(output_type) else None)
 
     enter_fragment_definition = enter_inline_fragment
 
@@ -506,9 +652,27 @@ class TypeInfo:
         :meta private:
         """
         input_type = type_from_ast(self._schema, node.type)
-        self._input_type_stack.append(
-            cast(GraphQLInputType, input_type) if is_input_type(input_type) else None
+        self._input_type_stack.append(input_type if is_input_type(input_type) else None)
+
+    def enter_fragment_argument(self, node: FragmentArgumentNode) -> None:
+        """Update this TypeInfo instance for an entered fragment argument node.
+
+        :meta private:
+        """
+        fragment_signature = self.get_fragment_signature()
+        arg_def = (
+            fragment_signature.variable_definitions.get(node.name.value)
+            if fragment_signature
+            else None
         )
+        self._fragment_argument = arg_def
+        arg_type = type_from_ast(self._schema, arg_def.type) if arg_def else None
+        # Fragment arguments have a variable default but no location default;
+        # push Undefined so get_default_value() reports "no default" here and the
+        # leave handler's default-value pop stays balanced (unlike GraphQL.js,
+        # which relies on an empty-stack read returning undefined).
+        self._default_value_stack.append(Undefined)
+        self._input_type_stack.append(arg_type if is_input_type(arg_type) else None)
 
     def enter_argument(self, node: ArgumentNode) -> None:
         """Update this TypeInfo instance for an entered argument node.
@@ -523,22 +687,19 @@ class TypeInfo:
             arg_def = arg_type = None
         self._argument = arg_def
         self._default_value_stack.append(
-            arg_def.default_value if arg_def else Undefined
+            (arg_def.default if arg_def.default is not None else arg_def.default_value)
+            if arg_def
+            else Undefined
         )
         self._input_type_stack.append(arg_type if is_input_type(arg_type) else None)
 
-    # noinspection PyUnusedLocal
-    def enter_list_value(self, node: ListValueNode) -> None:
+    def enter_list_value(self, _node: ListValueNode) -> None:
         """Update this TypeInfo instance for an entered list value node.
 
         :meta private:
         """
-        list_type = get_nullable_type(self.get_input_type())  # type: ignore
-        item_type = (
-            cast(GraphQLList, list_type).of_type
-            if is_list_type(list_type)
-            else list_type
-        )
+        list_type = get_nullable_type(self.get_input_type())
+        item_type = list_type.of_type if is_list_type(list_type) else None
         # List positions never have a default value.
         self._default_value_stack.append(Undefined)
         self._input_type_stack.append(item_type if is_input_type(item_type) else None)
@@ -550,14 +711,18 @@ class TypeInfo:
         """
         object_type = get_named_type(self.get_input_type())
         if is_input_object_type(object_type):
-            input_field = cast(GraphQLInputObjectType, object_type).fields.get(
-                node.name.value
-            )
+            input_field = object_type.fields.get(node.name.value)
             input_field_type = input_field.type if input_field else None
         else:
             input_field = input_field_type = None
         self._default_value_stack.append(
-            input_field.default_value if input_field else Undefined
+            (
+                input_field.default
+                if input_field.default is not None
+                else input_field.default_value
+            )
+            if input_field
+            else Undefined
         )
         self._input_type_stack.append(
             input_field_type if is_input_type(input_field_type) else None
@@ -570,10 +735,19 @@ class TypeInfo:
         """
         enum_type = get_named_type(self.get_input_type())
         if is_enum_type(enum_type):
-            enum_value = cast(GraphQLEnumType, enum_type).values.get(node.value)
+            enum_value = enum_type.values.get(node.value)
         else:
             enum_value = None
         self._enum_value = enum_value
+
+    def leave_document(self) -> None:
+        """Update this TypeInfo instance for a left document node.
+
+        :meta private:
+        """
+        self._fragment_signatures_by_name = (
+            lambda _fragment_name: None  # pragma: no cover
+        )
 
     def leave_selection_set(self) -> None:
         """Update this TypeInfo instance for a left selection set node.
@@ -607,11 +781,27 @@ class TypeInfo:
     leave_inline_fragment = leave_operation_definition
     leave_fragment_definition = leave_operation_definition
 
+    def leave_fragment_spread(self) -> None:
+        """Update this TypeInfo instance for a left fragment spread node.
+
+        :meta private:
+        """
+        self._fragment_signature = None
+
     def leave_variable_definition(self) -> None:
         """Update this TypeInfo instance for a left variable definition node.
 
         :meta private:
         """
+        del self._input_type_stack[-1:]
+
+    def leave_fragment_argument(self) -> None:
+        """Update this TypeInfo instance for a left fragment argument node.
+
+        :meta private:
+        """
+        self._fragment_argument = None
+        del self._default_value_stack[-1:]
         del self._input_type_stack[-1:]
 
     def leave_argument(self) -> None:
@@ -641,26 +831,19 @@ class TypeInfo:
         self._enum_value = None
 
 
-def get_field_def(
-    schema: GraphQLSchema, parent_type: GraphQLType, field_node: FieldNode
-) -> Optional[GraphQLField]:
-    """Get field definition.
-
-    Not exactly the same as the executor's definition of
-    :func:`graphql.execution.get_field_def`, in this statically evaluated environment
-    we do not always have an Object type, and need to handle Interface and Union types.
-    """
-    name = field_node.name.value
-    if name == "__schema" and schema.query_type is parent_type:
-        return SchemaMetaFieldDef
-    if name == "__type" and schema.query_type is parent_type:
-        return TypeMetaFieldDef
-    if name == "__typename" and is_composite_type(parent_type):
-        return TypeNameMetaFieldDef
-    if is_object_type(parent_type) or is_interface_type(parent_type):
-        parent_type = cast(Union[GraphQLObjectType, GraphQLInterfaceType], parent_type)
-        return parent_type.fields.get(name)
-    return None
+def get_fragment_signatures(document: DocumentNode) -> dict[str, FragmentSignature]:
+    """Collect the fragment signatures of all fragment definitions in a document."""
+    fragment_signatures: dict[str, FragmentSignature] = {}
+    for definition in document.definitions:
+        if isinstance(definition, FragmentDefinitionNode):
+            variable_definitions: dict[str, VariableDefinitionNode] = {}
+            if definition.variable_definitions:
+                for var_def in definition.variable_definitions:
+                    variable_definitions[var_def.variable.name.value] = var_def
+            fragment_signatures[definition.name.value] = FragmentSignature(
+                definition, variable_definitions
+            )
+    return fragment_signatures
 
 
 class TypeInfoVisitor(Visitor):
@@ -693,7 +876,7 @@ class TypeInfoVisitor(Visitor):
     [{'name': 'greeting', 'parent_type': 'Query', 'type': 'String'}]
     """
 
-    def __init__(self, type_info: "TypeInfo", visitor: Visitor):
+    def __init__(self, type_info: TypeInfo, visitor: Visitor) -> None:
         super().__init__()
         self.type_info = type_info
         self.visitor = visitor
@@ -705,13 +888,14 @@ class TypeInfoVisitor(Visitor):
         """
         self.type_info.enter(node)
         fn = self.visitor.get_enter_leave_for_kind(node.kind).enter
-        if fn:
-            result = fn(node, *args)
-            if result is not None:
-                self.type_info.leave(node)
-                if isinstance(result, Node):
-                    self.type_info.enter(result)
-            return result
+        if not fn:
+            return None
+        result = fn(node, *args)
+        if result is not None:
+            self.type_info.leave(node)
+            if isinstance(result, Node):
+                self.type_info.enter(result)
+        return result
 
     def leave(self, node: Node, *args: Any) -> Any:
         """Call the leave function of the wrapped visitor and update the TypeInfo.

@@ -1,27 +1,38 @@
 """Validation"""
 
-from typing import Collection, Dict, List, Optional, Tuple, Type
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 from ..error import GraphQLError
 from ..language import DocumentNode, ParallelVisitor, visit
 from ..language.ast import QUERY_DOCUMENT_KEYS
-from ..pyutils import inspect, is_collection
 from ..type import GraphQLSchema, assert_valid_schema
 from ..utilities import TypeInfo, TypeInfoVisitor
-from .rules import ASTValidationRule
 from .specified_rules import specified_rules, specified_sdl_rules
 from .validation_context import SDLValidationContext, ValidationContext
 
-__all__ = ["assert_valid_sdl", "assert_valid_sdl_extension", "validate", "validate_sdl"]
+if TYPE_CHECKING:
+    from collections.abc import Collection
+
+    from .rules import ASTValidationRule
+
+__all__ = [
+    "ValidationAbortedError",
+    "assert_valid_sdl",
+    "assert_valid_sdl_extension",
+    "validate",
+    "validate_sdl",
+]
 
 
-class ValidationAbortedError(RuntimeError):
+class ValidationAbortedError(GraphQLError):
     """Error when a validation has been aborted (error limit reached)."""
 
 
 # Per the specification, descriptions must not affect validation.
 # See https://spec.graphql.org/draft/#sec-Descriptions
-query_document_keys_to_validate: Dict[str, Tuple[str, ...]] = {
+query_document_keys_to_validate: dict[str, tuple[str, ...]] = {
     kind: tuple(key for key in keys if key != "description")
     for kind, keys in QUERY_DOCUMENT_KEYS.items()
 }
@@ -30,10 +41,10 @@ query_document_keys_to_validate: Dict[str, Tuple[str, ...]] = {
 def validate(
     schema: GraphQLSchema,
     document_ast: DocumentNode,
-    rules: Optional[Collection[Type[ASTValidationRule]]] = None,
-    max_errors: Optional[int] = None,
-    type_info: Optional[TypeInfo] = None,
-) -> List[GraphQLError]:
+    rules: Collection[type[ASTValidationRule]] | None = None,
+    max_errors: int | None = None,
+    hide_suggestions: bool = False,
+) -> list[GraphQLError]:
     """Implements the "Validation" section of the spec.
 
     Validation runs synchronously, returning a list of encountered errors, or an empty
@@ -50,17 +61,14 @@ def validate(
     Attackers can send pathologically invalid queries to induce a DoS attack,
     so ``max_errors`` defaults to 100 errors.
 
-    Providing a custom TypeInfo instance is deprecated; omit the ``type_info``
-    argument so that validate creates the TypeInfo instance. It will be removed in v3.3.
-
     :param schema: Schema to validate against.
     :param document_ast: Document AST to validate.
     :param rules: Validation rules to apply. Defaults to
         :data:`~graphql.validation.specified_rules`.
     :param max_errors: Maximum number of validation errors before validation stops.
         Defaults to 100.
-    :param type_info: TypeInfo instance used to track traversal state during
-        validation (deprecated, will be removed in v3.3).
+    :param hide_suggestions: Whether suggestion text should be omitted from
+        validation errors.
     :returns: Validation errors, or an empty list when the document is valid.
 
     Validate with the default specified rules:
@@ -73,52 +81,42 @@ def validate(
     >>> print(errors[0].message)
     Cannot query field 'missing' on type 'Query'.
 
-    This variant uses a custom rule list and an error limit:
+    This variant uses a custom rule list and validation options:
 
     >>> from graphql.validation import FieldsOnCorrectTypeRule
     >>> document = parse('{ missingOne missingTwo }')
-    >>> errors = validate(
-    ...     schema, document, [FieldsOnCorrectTypeRule], max_errors=1)
+    >>> errors = validate(schema, document, [FieldsOnCorrectTypeRule], max_errors=1)
     >>> len(errors)
     2
     >>> print(errors[1].message)
     Too many validation errors, error limit reached. Validation aborted.
+    >>> errors = validate(
+    ...     schema, parse('{ name }'), [FieldsOnCorrectTypeRule], hide_suggestions=True
+    ... )
+    >>> print(errors[0].message)
+    Cannot query field 'name' on type 'Query'.
     """
-    if not document_ast or not isinstance(document_ast, DocumentNode):
-        raise TypeError("Must provide document.")
     # If the schema used for validation is invalid, throw an error.
     assert_valid_schema(schema)
     if max_errors is None:
         max_errors = 100
-    elif not isinstance(max_errors, int):
-        raise TypeError("The maximum number of errors must be passed as an int.")
-    if type_info is None:
-        type_info = TypeInfo(schema)
-    elif not isinstance(type_info, TypeInfo):
-        raise TypeError(f"Not a TypeInfo object: {inspect(type_info)}.")
     if rules is None:
         rules = specified_rules
-    elif not is_collection(rules) or not all(
-        isinstance(rule, type) and issubclass(rule, ASTValidationRule) for rule in rules
-    ):
-        raise TypeError(
-            "Rules must be specified as a collection of ASTValidationRule subclasses."
-        )
 
-    errors: List[GraphQLError] = []
+    errors: list[GraphQLError] = []
+    type_info = TypeInfo(schema)
 
     def on_error(error: GraphQLError) -> None:
         if len(errors) >= max_errors:
-            errors.append(
-                GraphQLError(
-                    "Too many validation errors, error limit reached."
-                    " Validation aborted."
-                )
-            )
-            raise ValidationAbortedError
+            # Unlike GraphQL.js, create a new error each time, because raising a
+            # shared error would add the frames of every validation to its traceback.
+            msg = "Too many validation errors, error limit reached. Validation aborted."
+            raise ValidationAbortedError(msg)
         errors.append(error)
 
-    context = ValidationContext(schema, document_ast, type_info, on_error)
+    context = ValidationContext(
+        schema, document_ast, type_info, on_error, hide_suggestions
+    )
 
     # This uses a specialized visitor which runs multiple visitors in parallel,
     # while maintaining the visitor skip and break API.
@@ -131,21 +129,24 @@ def validate(
             TypeInfoVisitor(type_info, ParallelVisitor(visitors)),
             query_document_keys_to_validate,
         )
-    except ValidationAbortedError:
-        pass
+    except ValidationAbortedError as error:
+        # Do not keep the frames of the validation alive with the returned error,
+        # also not via the context of an error that was handled while aborting.
+        error.__context__ = None
+        errors.append(error.with_traceback(None))
     return errors
 
 
 def validate_sdl(
     document_ast: DocumentNode,
-    schema_to_extend: Optional[GraphQLSchema] = None,
-    rules: Optional[Collection[Type[ASTValidationRule]]] = None,
-) -> List[GraphQLError]:
+    schema_to_extend: GraphQLSchema | None = None,
+    rules: Collection[type[ASTValidationRule]] | None = None,
+) -> list[GraphQLError]:
     """Validate an SDL document.
 
     For internal use only.
     """
-    errors: List[GraphQLError] = []
+    errors: list[GraphQLError] = []
     context = SDLValidationContext(document_ast, schema_to_extend, errors.append)
     if rules is None:
         rules = specified_sdl_rules

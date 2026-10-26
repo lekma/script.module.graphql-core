@@ -1,17 +1,16 @@
 """Get introspection query"""
 
+from __future__ import annotations
+
 from textwrap import dedent
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any
 
-from ..language import DirectiveLocation
+if TYPE_CHECKING:
+    from ..language import DirectiveLocation
 
-try:
-    from typing import Literal, TypedDict
-except ImportError:  # Python < 3.8
-    from typing_extensions import Literal, TypedDict
+from typing import Literal, TypeAlias, TypedDict
 
 __all__ = [
-    "get_introspection_query",
     "IntrospectionDirective",
     "IntrospectionEnumType",
     "IntrospectionField",
@@ -27,6 +26,7 @@ __all__ = [
     "IntrospectionType",
     "IntrospectionTypeRef",
     "IntrospectionUnionType",
+    "get_introspection_query",
 ]
 
 
@@ -37,7 +37,7 @@ def get_introspection_query(
     schema_description: bool = False,
     input_value_deprecation: bool = False,
     experimental_directive_deprecation: bool = False,
-    input_object_one_of: bool = False,
+    one_of: bool = False,
     type_depth: int = 9,
 ) -> str:
     """Get a query for introspection.
@@ -62,8 +62,8 @@ def get_introspection_query(
         deprecation of input values.
     :param experimental_directive_deprecation: Whether the target GraphQL server
         supports deprecation of directives.
-    :param input_object_one_of: Whether the target GraphQL server supports ``@oneOf``
-        input objects.
+    :param one_of: Whether the target GraphQL server supports ``@oneOf`` input
+        objects.
     :param type_depth: How deep to recurse into nested types.
     :returns: The resolved introspection query.
 
@@ -87,7 +87,7 @@ def get_introspection_query(
     ...     schema_description=True,
     ...     input_value_deprecation=True,
     ...     experimental_directive_deprecation=True,
-    ...     input_object_one_of=True,
+    ...     one_of=True,
     ...     type_depth=3,
     ... )
     >>> 'description' in query
@@ -107,12 +107,12 @@ def get_introspection_query(
     maybe_specified_by_url = "specifiedByURL" if specified_by_url else ""
     maybe_directive_is_repeatable = "isRepeatable" if directive_is_repeatable else ""
     maybe_schema_description = maybe_description if schema_description else ""
-    maybe_input_object_one_of = "isOneOf" if input_object_one_of else ""
+    maybe_one_of = "isOneOf" if one_of else ""
 
-    def input_deprecation(string: str) -> Optional[str]:
+    def input_deprecation(string: str) -> str | None:
         return string if input_value_deprecation else ""
 
-    def directive_deprecation(string: str) -> Optional[str]:
+    def directive_deprecation(string: str) -> str | None:
         return string if experimental_directive_deprecation else ""
 
     def of_type(level: int, indent: str) -> str:
@@ -131,7 +131,8 @@ def get_introspection_query(
             f"\n{indent}}}"
         )
 
-    return dedent(f"""
+    return dedent(
+        f"""
         query IntrospectionQuery {{
           __schema {{
             {maybe_schema_description}
@@ -160,7 +161,7 @@ def get_introspection_query(
           name
           {maybe_description}
           {maybe_specified_by_url}
-          {maybe_input_object_one_of}
+          {maybe_one_of}
           fields(includeDeprecated: true) {{
             name
             {maybe_description}
@@ -203,7 +204,8 @@ def get_introspection_query(
           kind
           name{of_type(type_depth, "          ")}
         }}
-        """)
+        """
+    )
 
 
 # Unfortunately, the following type definitions are a bit simplistic
@@ -212,13 +214,13 @@ def get_introspection_query(
 # - no generic typed dicts, see https://github.com/python/mypy/issues/3863
 
 # simplified IntrospectionNamedType to avoids cycles
-SimpleIntrospectionType = Dict[str, Any]
+SimpleIntrospectionType: TypeAlias = dict[str, Any]
 
 
 class MaybeWithDescription(TypedDict, total=False):
     """Introspection data with an optional description."""
 
-    description: Optional[str]
+    description: str | None
     """Human-readable description for this schema element, if provided."""
 
 
@@ -232,7 +234,7 @@ class WithName(MaybeWithDescription):
 class MaybeWithSpecifiedByUrl(TypedDict, total=False):
     """Introspection data with an optional ``specifiedByURL``."""
 
-    specifiedByURL: Optional[str]
+    specifiedByURL: str | None
     """URL identifying the behavior specified for this custom scalar."""
 
 
@@ -241,7 +243,7 @@ class WithDeprecated(TypedDict):
 
     isDeprecated: bool
     """Whether this field, argument, enum value, or input value is deprecated."""
-    deprecationReason: Optional[str]
+    deprecationReason: str | None
     """Reason this element is deprecated, if one was provided."""
 
 
@@ -250,7 +252,7 @@ class MaybeWithDeprecated(TypedDict, total=False):
 
     isDeprecated: bool
     """Whether this field, argument, enum value, or input value is deprecated."""
-    deprecationReason: Optional[str]
+    deprecationReason: str | None
     """Reason this element is deprecated, if one was provided."""
 
 
@@ -259,14 +261,14 @@ class IntrospectionInputValue(WithName, MaybeWithDeprecated):
 
     type: SimpleIntrospectionType  # should be IntrospectionInputType
     """The GraphQL type reference or runtime type for this element."""
-    defaultValue: Optional[str]
+    defaultValue: str | None
     """Default value used when no explicit value is supplied."""
 
 
 class IntrospectionField(WithName, WithDeprecated):
     """The introspection representation of a field."""
 
-    args: List[IntrospectionInputValue]
+    args: list[IntrospectionInputValue]
     """Arguments accepted by this field or directive."""
     type: SimpleIntrospectionType  # should be IntrospectionOutputType
     """The GraphQL type reference or runtime type for this element."""
@@ -286,9 +288,9 @@ class MaybeWithIsRepeatable(TypedDict, total=False):
 class IntrospectionDirective(WithName, MaybeWithIsRepeatable, MaybeWithDeprecated):
     """The introspection representation of a directive."""
 
-    locations: List[DirectiveLocation]
+    locations: list[DirectiveLocation]
     """Locations where this directive may be applied."""
-    args: List[IntrospectionInputValue]
+    args: list[IntrospectionInputValue]
     """Arguments accepted by this field or directive."""
 
 
@@ -304,11 +306,11 @@ class IntrospectionInterfaceType(WithName):
 
     kind: Literal["INTERFACE"]
     """The introspection kind discriminator for this type reference or type."""
-    fields: List[IntrospectionField]
+    fields: list[IntrospectionField]
     """Fields declared by this object, interface, input object, or literal."""
-    interfaces: List[SimpleIntrospectionType]  # should be InterfaceType
+    interfaces: list[SimpleIntrospectionType]  # should be InterfaceType
     """Interfaces implemented by this object or interface type."""
-    possibleTypes: List[SimpleIntrospectionType]  # should be NamedType
+    possibleTypes: list[SimpleIntrospectionType]  # should be NamedType
     """Object types that may be returned for this abstract type."""
 
 
@@ -317,9 +319,9 @@ class IntrospectionObjectType(WithName):
 
     kind: Literal["OBJECT"]
     """The introspection kind discriminator for this type reference or type."""
-    fields: List[IntrospectionField]
+    fields: list[IntrospectionField]
     """Fields declared by this object, interface, input object, or literal."""
-    interfaces: List[SimpleIntrospectionType]  # should be InterfaceType
+    interfaces: list[SimpleIntrospectionType]  # should be InterfaceType
     """Interfaces implemented by this object or interface type."""
 
 
@@ -328,7 +330,7 @@ class IntrospectionUnionType(WithName):
 
     kind: Literal["UNION"]
     """The introspection kind discriminator for this type reference or type."""
-    possibleTypes: List[SimpleIntrospectionType]  # should be NamedType
+    possibleTypes: list[SimpleIntrospectionType]  # should be NamedType
     """Object types that may be returned for this abstract type."""
 
 
@@ -337,7 +339,7 @@ class IntrospectionEnumType(WithName):
 
     kind: Literal["ENUM"]
     """The introspection kind discriminator for this type reference or type."""
-    enumValues: List[IntrospectionEnumValue]
+    enumValues: list[IntrospectionEnumValue]
     """Values declared by this enum type."""
 
 
@@ -346,32 +348,35 @@ class IntrospectionInputObjectType(WithName):
 
     kind: Literal["INPUT_OBJECT"]
     """The introspection kind discriminator for this type reference or type."""
-    inputFields: List[IntrospectionInputValue]
+    inputFields: list[IntrospectionInputValue]
     """Input fields declared by this input object type."""
     isOneOf: bool
     """Whether this input object uses the OneOf input object semantics."""
 
 
-IntrospectionType = Union[
-    IntrospectionScalarType,
-    IntrospectionObjectType,
-    IntrospectionInterfaceType,
-    IntrospectionUnionType,
-    IntrospectionEnumType,
-    IntrospectionInputObjectType,
-]
+IntrospectionType: TypeAlias = (
+    IntrospectionScalarType
+    | IntrospectionObjectType
+    | IntrospectionInterfaceType
+    | IntrospectionUnionType
+    | IntrospectionEnumType
+    | IntrospectionInputObjectType
+)
+"""Any introspection representation of a GraphQL type."""
 
-IntrospectionOutputType = Union[
-    IntrospectionScalarType,
-    IntrospectionObjectType,
-    IntrospectionInterfaceType,
-    IntrospectionUnionType,
-    IntrospectionEnumType,
-]
+IntrospectionOutputType: TypeAlias = (
+    IntrospectionScalarType
+    | IntrospectionObjectType
+    | IntrospectionInterfaceType
+    | IntrospectionUnionType
+    | IntrospectionEnumType
+)
+"""An introspection type that can appear in output position."""
 
-IntrospectionInputType = Union[
-    IntrospectionScalarType, IntrospectionEnumType, IntrospectionInputObjectType
-]
+IntrospectionInputType: TypeAlias = (
+    IntrospectionScalarType | IntrospectionEnumType | IntrospectionInputObjectType
+)
+"""An introspection type that can appear in input position."""
 
 
 class IntrospectionListType(TypedDict):
@@ -392,9 +397,10 @@ class IntrospectionNonNullType(TypedDict):
     """The type wrapped by this list or non-null type."""
 
 
-IntrospectionTypeRef = Union[
-    IntrospectionType, IntrospectionListType, IntrospectionNonNullType
-]
+IntrospectionTypeRef: TypeAlias = (
+    IntrospectionType | IntrospectionListType | IntrospectionNonNullType
+)
+"""Any introspection representation of a type reference."""
 
 
 class IntrospectionSchema(MaybeWithDescription):
@@ -402,13 +408,13 @@ class IntrospectionSchema(MaybeWithDescription):
 
     queryType: IntrospectionObjectType
     """The root object type used for query operations."""
-    mutationType: Optional[IntrospectionObjectType]
+    mutationType: IntrospectionObjectType | None
     """The root object type used for mutation operations, if supported."""
-    subscriptionType: Optional[IntrospectionObjectType]
+    subscriptionType: IntrospectionObjectType | None
     """The root object type used for subscription operations, if supported."""
-    types: List[IntrospectionType]
+    types: list[IntrospectionType]
     """All named types that belong to this schema."""
-    directives: List[IntrospectionDirective]
+    directives: list[IntrospectionDirective]
     """Directives available in this schema."""
 
 

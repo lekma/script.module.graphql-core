@@ -1,13 +1,15 @@
 """Middleware manager"""
 
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
 from functools import partial, reduce
 from inspect import isfunction
-
-from typing import Callable, Iterator, Dict, List, Tuple, Any, Optional
+from typing import Any, TypeAlias
 
 __all__ = ["MiddlewareManager"]
 
-GraphQLFieldResolver = Callable[..., Any]
+GraphQLFieldResolver: TypeAlias = Callable[..., Any]
 
 
 class MiddlewareManager:
@@ -50,16 +52,13 @@ class MiddlewareManager:
     ExecutionResult(data={'greeting': 'HELLO!'}, errors=None)
     """
 
-    middlewares: Tuple[Any, ...]
-    """The middleware functions and/or objects that have been passed in."""
-
     # allow custom attributes (not used internally)
-    __slots__ = "__dict__", "middlewares", "_middleware_resolvers", "_cached_resolvers"
+    __slots__ = "__dict__", "_cached_resolvers", "_middleware_resolvers", "middlewares"
 
-    _cached_resolvers: Dict[GraphQLFieldResolver, GraphQLFieldResolver]
-    _middleware_resolvers: Optional[List[Callable]]
+    _cached_resolvers: dict[GraphQLFieldResolver, GraphQLFieldResolver]
+    _middleware_resolvers: list[Callable] | None
 
-    def __init__(self, *middlewares: Any):
+    def __init__(self, *middlewares: Any) -> None:
         self.middlewares = middlewares
         self._middleware_resolvers = (
             list(get_middleware_resolvers(middlewares)) if middlewares else None
@@ -97,7 +96,7 @@ class MiddlewareManager:
         return self._cached_resolvers[field_resolver]
 
 
-def get_middleware_resolvers(middlewares: Tuple[Any, ...]) -> Iterator[Callable]:
+def get_middleware_resolvers(middlewares: tuple[Any, ...]) -> Iterator[Callable]:
     """Get a list of resolver functions from a list of classes or functions.
 
     :meta private:
@@ -105,7 +104,6 @@ def get_middleware_resolvers(middlewares: Tuple[Any, ...]) -> Iterator[Callable]
     for middleware in middlewares:
         if isfunction(middleware):
             yield middleware
-        else:  # middleware provided as object with 'resolve' method
-            resolver_func = getattr(middleware, "resolve", None)
-            if resolver_func is not None:
-                yield resolver_func
+        elif resolver_func := getattr(middleware, "resolve", None):
+            # middleware provided as object with 'resolve' method
+            yield resolver_func

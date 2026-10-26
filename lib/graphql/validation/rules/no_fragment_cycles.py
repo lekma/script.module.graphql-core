@@ -1,9 +1,11 @@
 """No fragment cycles rule"""
 
-from typing import Any, Dict, List, Set
+from __future__ import annotations
+
+from typing import Any
 
 from ...error import GraphQLError
-from ...language import FragmentDefinitionNode, FragmentSpreadNode, VisitorAction, SKIP
+from ...language import SKIP, FragmentDefinitionNode, FragmentSpreadNode, VisitorAction
 from . import ASTValidationContext, ASTValidationRule
 
 __all__ = ["NoFragmentCyclesRule"]
@@ -34,15 +36,15 @@ class NoFragmentCyclesRule(ASTValidationRule):
     []
     """
 
-    def __init__(self, context: ASTValidationContext):
+    def __init__(self, context: ASTValidationContext) -> None:
         super().__init__(context)
         # Tracks already visited fragments to maintain O(N) and to ensure that
         # cycles are not redundantly reported.
-        self.visited_frags: Set[str] = set()
+        self.visited_frags: set[str] = set()
         # List of AST nodes used to produce meaningful errors
-        self.spread_path: List[FragmentSpreadNode] = []
+        self.spread_path: list[FragmentSpreadNode] = []
         # Position in the spread path
-        self.spread_path_index_by_name: Dict[str, int] = {}
+        self.spread_path_index_by_name: dict[str, int] = {}
 
     @staticmethod
     def enter_operation_definition(*_args: Any) -> VisitorAction:
@@ -59,13 +61,13 @@ class NoFragmentCyclesRule(ASTValidationRule):
         return SKIP
 
     def detect_cycle_recursive(self, fragment: FragmentDefinitionNode) -> None:
+        # This does a straight-forward DFS to find cycles.
+        # It does not terminate when a cycle was found but continues to explore
+        # the graph to find all possible cycles.
         """Detect fragment spread cycles starting at the given fragment.
 
         :meta private:
         """
-        # This does a straight-forward DFS to find cycles.
-        # It does not terminate when a cycle was found but continues to explore
-        # the graph to find all possible cycles.
         if fragment.name.value in self.visited_frags:
             return
 

@@ -1,17 +1,21 @@
 """Unique operation types rule"""
 
-from typing import Any, Dict, Optional, Union
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from ...error import GraphQLError
 from ...language import (
-    OperationTypeDefinitionNode,
+    SKIP,
     OperationType,
+    OperationTypeDefinitionNode,
     SchemaDefinitionNode,
     SchemaExtensionNode,
     VisitorAction,
-    SKIP,
 )
-from ...type import GraphQLObjectType
+
+if TYPE_CHECKING:
+    from ...type import GraphQLObjectType
 from . import SDLValidationContext, SDLValidationRule
 
 __all__ = ["UniqueOperationTypesRule"]
@@ -41,15 +45,13 @@ class UniqueOperationTypesRule(SDLValidationRule):
     >>> schema = build_schema(sdl)
     """
 
-    def __init__(self, context: SDLValidationContext):
+    def __init__(self, context: SDLValidationContext) -> None:
         super().__init__(context)
         schema = context.schema
-        self.defined_operation_types: Dict[
+        self.defined_operation_types: dict[
             OperationType, OperationTypeDefinitionNode
         ] = {}
-        self.existing_operation_types: Dict[
-            OperationType, Optional[GraphQLObjectType]
-        ] = (
+        self.existing_operation_types: dict[OperationType, GraphQLObjectType | None] = (
             {
                 OperationType.QUERY: schema.query_type,
                 OperationType.MUTATION: schema.mutation_type,
@@ -61,7 +63,7 @@ class UniqueOperationTypesRule(SDLValidationRule):
         self.schema = schema
 
     def check_operation_types(
-        self, node: Union[SchemaDefinitionNode, SchemaExtensionNode], *_args: Any
+        self, node: SchemaDefinitionNode | SchemaExtensionNode, *_args: Any
     ) -> VisitorAction:
         """Report root operation types that are defined more than once.
 

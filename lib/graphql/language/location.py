@@ -1,16 +1,13 @@
 """Source locations"""
 
-from typing import Any, NamedTuple, TYPE_CHECKING
+from __future__ import annotations
 
-try:
-    from typing import TypedDict
-except ImportError:  # Python < 3.8
-    from typing_extensions import TypedDict
+from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 if TYPE_CHECKING:
-    from .source import Source  # noqa: F401
+    from .source import Source
 
-__all__ = ["get_location", "SourceLocation", "FormattedSourceLocation"]
+__all__ = ["FormattedSourceLocation", "SourceLocation", "get_location"]
 
 
 class FormattedSourceLocation(TypedDict):
@@ -32,19 +29,22 @@ class SourceLocation(NamedTuple):
 
     @property
     def formatted(self) -> FormattedSourceLocation:
-        """Get the location formatted as a dictionary."""
-        return dict(line=self.line, column=self.column)
+        """Get formatted source location."""
+        return {"line": self.line, "column": self.column}
 
-    def __eq__(self, other: Any) -> bool:
+    def __eq__(self, other: object) -> bool:
         if isinstance(other, dict):
             return self.formatted == other
         return tuple(self) == other
 
-    def __ne__(self, other: Any) -> bool:
+    def __ne__(self, other: object) -> bool:
         return not self == other
 
+    def __hash__(self) -> int:
+        return hash((self.line, self.column))
 
-def get_location(source: "Source", position: int) -> SourceLocation:
+
+def get_location(source: Source, position: int) -> SourceLocation:
     """Get the line and column for a character position in the source.
 
     Takes a Source and a UTF-8 character offset, and returns the corresponding line and

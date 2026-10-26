@@ -1,11 +1,15 @@
 """No deprecated rule"""
 
-from typing import Any, cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
 
 from ....error import GraphQLError
-from ....language import ArgumentNode, EnumValueNode, FieldNode, ObjectFieldNode
-from ....type import GraphQLInputObjectType, get_named_type, is_input_object_type
+from ....type import get_named_type, is_input_object_type
 from .. import ValidationRule
+
+if TYPE_CHECKING:
+    from ....language import ArgumentNode, EnumValueNode, FieldNode, ObjectFieldNode
 
 __all__ = ["NoDeprecatedCustomRule"]
 
@@ -52,10 +56,9 @@ class NoDeprecatedCustomRule(ValidationRule):
             deprecation_reason = field_def.deprecation_reason
             if deprecation_reason is not None:
                 parent_type = context.get_parent_type()
-                parent_name = parent_type.name  # type: ignore
                 self.report_error(
                     GraphQLError(
-                        f"The field {parent_name}.{node.name.value}"
+                        f"The field {parent_type}.{node.name.value}"
                         f" is deprecated. {deprecation_reason}",
                         node,
                     )
@@ -75,21 +78,20 @@ class NoDeprecatedCustomRule(ValidationRule):
                 arg_name = node.name.value
                 if directive_def is None:
                     parent_type = context.get_parent_type()
-                    parent_name = parent_type.name  # type: ignore
                     field_def = context.get_field_def()
                     field_name = field_def.ast_node.name.value  # type: ignore
                     self.report_error(
                         GraphQLError(
-                            f"Field '{parent_name}.{field_name}' argument"
-                            f" '{arg_name}' is deprecated. {deprecation_reason}",
+                            f"The argument '{parent_type}.{field_name}({arg_name}:)'"
+                            f" is deprecated. {deprecation_reason}",
                             node,
                         )
                     )
                 else:
                     self.report_error(
                         GraphQLError(
-                            f"Directive '@{directive_def.name}' argument"
-                            f" '{arg_name}' is deprecated. {deprecation_reason}",
+                            f"The argument '@{directive_def.name}({arg_name}:)'"
+                            f" is deprecated. {deprecation_reason}",
                             node,
                         )
                     )
@@ -102,14 +104,12 @@ class NoDeprecatedCustomRule(ValidationRule):
         context = self.context
         input_object_def = get_named_type(context.get_parent_input_type())
         if is_input_object_type(input_object_def):
-            input_field_def = cast(GraphQLInputObjectType, input_object_def).fields.get(
-                node.name.value
-            )
+            input_field_def = input_object_def.fields.get(node.name.value)
             if input_field_def:
                 deprecation_reason = input_field_def.deprecation_reason
                 if deprecation_reason is not None:
                     field_name = node.name.value
-                    input_object_name = input_object_def.name  # type: ignore
+                    input_object_name = input_object_def.name
                     self.report_error(
                         GraphQLError(
                             f"The input field {input_object_name}.{field_name}"
@@ -127,7 +127,7 @@ class NoDeprecatedCustomRule(ValidationRule):
         enum_value_def = context.get_enum_value()
         if enum_value_def:
             deprecation_reason = enum_value_def.deprecation_reason
-            if deprecation_reason is not None:  # pragma: no cover else
+            if deprecation_reason is not None:  # pragma: no branch
                 enum_type_def = get_named_type(context.get_input_type())
                 enum_type_name = enum_type_def.name  # type: ignore
                 self.report_error(

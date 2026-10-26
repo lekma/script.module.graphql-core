@@ -1,9 +1,11 @@
 """Unique type names rule"""
 
-from typing import Any, Dict
+from __future__ import annotations
+
+from typing import Any
 
 from ...error import GraphQLError
-from ...language import NameNode, TypeDefinitionNode, VisitorAction, SKIP
+from ...language import SKIP, NameNode, TypeDefinitionNode, VisitorAction
 from . import SDLValidationContext, SDLValidationRule
 
 __all__ = ["UniqueTypeNamesRule"]
@@ -30,9 +32,9 @@ class UniqueTypeNamesRule(SDLValidationRule):
     >>> schema = build_schema(sdl)
     """
 
-    def __init__(self, context: SDLValidationContext):
+    def __init__(self, context: SDLValidationContext) -> None:
         super().__init__(context)
-        self.known_type_names: Dict[str, NameNode] = {}
+        self.known_type_names: dict[str, NameNode] = {}
         self.schema = context.schema
 
     def check_type_name(self, node: TypeDefinitionNode, *_args: Any) -> VisitorAction:

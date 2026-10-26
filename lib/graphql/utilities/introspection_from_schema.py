@@ -1,11 +1,15 @@
 """Building introspection queries from GraphQL schemas"""
 
-from typing import cast
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
 
 from ..error import GraphQLError
 from ..language import parse
-from ..type import GraphQLSchema
-from .get_introspection_query import get_introspection_query, IntrospectionQuery
+from .get_introspection_query import IntrospectionQuery, get_introspection_query
+
+if TYPE_CHECKING:
+    from ..type import GraphQLSchema
 
 __all__ = ["introspection_from_schema"]
 
@@ -18,7 +22,7 @@ def introspection_from_schema(
     schema_description: bool = True,
     input_value_deprecation: bool = True,
     experimental_directive_deprecation: bool = True,
-    input_object_one_of: bool = True,
+    one_of: bool = True,
 ) -> IntrospectionQuery:
     """Build an IntrospectionQuery from a GraphQLSchema
 
@@ -40,8 +44,7 @@ def introspection_from_schema(
         input values.
     :param experimental_directive_deprecation: Whether to include deprecation
         information of directives.
-    :param input_object_one_of: Whether to include the ``isOneOf`` flag on input
-        objects.
+    :param one_of: Whether to include the ``isOneOf`` flag on input objects.
     :returns: Introspection result data for the schema.
 
     Include schema metadata using the default introspection options:
@@ -70,7 +73,7 @@ def introspection_from_schema(
     ...     schema_description=False,
     ...     input_value_deprecation=False,
     ...     experimental_directive_deprecation=False,
-    ...     input_object_one_of=False,
+    ...     one_of=False,
     ... )
     >>> url_type = next(type_ for type_ in introspection['__schema']['types']
     ...                 if type_['name'] == 'Url')
@@ -94,17 +97,19 @@ def introspection_from_schema(
             schema_description,
             input_value_deprecation,
             experimental_directive_deprecation,
-            input_object_one_of,
+            one_of,
         )
     )
 
-    from ..execution.execute import execute_sync, ExecutionResult
+    from ..execution.execute import ExecutionResult, execute_sync
 
     result = execute_sync(schema, document)
     if not isinstance(result, ExecutionResult):  # pragma: no cover
-        raise RuntimeError("Introspection cannot be executed")
+        msg = "Introspection cannot be executed"
+        raise RuntimeError(msg)  # noqa: TRY004
     if result.errors:  # pragma: no cover
         raise result.errors[0]
     if not result.data:  # pragma: no cover
-        raise GraphQLError("Introspection did not return a result")
-    return cast(IntrospectionQuery, result.data)
+        msg = "Introspection did not return a result"
+        raise GraphQLError(msg)
+    return cast("IntrospectionQuery", result.data)

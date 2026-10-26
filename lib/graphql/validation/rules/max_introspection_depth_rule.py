@@ -1,6 +1,6 @@
 """Max introspection depth rule"""
 
-from typing import Dict, Any
+from typing import Any
 
 from ...error import GraphQLError
 from ...language import SKIP, FieldNode, FragmentSpreadNode, Node, VisitorAction
@@ -33,14 +33,14 @@ class MaxIntrospectionDepthRule(ASTValidationRule):
 
     def __init__(self, context: ValidationContext) -> None:
         super().__init__(context)
-        self._visited_fragments: Dict[str, None] = {}
+        self._visited_fragments: dict[str, None] = {}
         self._get_fragment = context.get_fragment
 
     def _check_depth(self, node: Node, depth: int = 0) -> bool:
         """Check whether the maximum introspection depth has been reached.
 
         Counts the depth of list fields in "__Type" recursively
-        and returns ``True`` if the limit has been reached.
+        and returns `True` if the limit has been reached.
         """
         if isinstance(node, FragmentSpreadNode):
             visited_fragments = self._visited_fragments

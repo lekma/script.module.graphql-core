@@ -1,13 +1,11 @@
 """Fragments on composite type rule"""
 
+from __future__ import annotations
+
 from typing import Any
 
 from ...error import GraphQLError
-from ...language import (
-    FragmentDefinitionNode,
-    InlineFragmentNode,
-    print_ast,
-)
+from ...language import FragmentDefinitionNode, InlineFragmentNode, print_ast
 from ...type import is_composite_type
 from ...utilities import type_from_ast
 from . import ValidationRule
@@ -44,17 +42,18 @@ class FragmentsOnCompositeTypesRule(ValidationRule):
         :meta private:
         """
         type_condition = node.type_condition
-        if type_condition:
-            type_ = type_from_ast(self.context.schema, type_condition)
-            if type_ and not is_composite_type(type_):
-                type_str = print_ast(type_condition)
-                self.report_error(
-                    GraphQLError(
-                        "Fragment cannot condition"
-                        f" on non composite type '{type_str}'.",
-                        type_condition,
-                    )
+        if (
+            type_condition
+            and (type_ := type_from_ast(self.context.schema, type_condition))
+            and not is_composite_type(type_)
+        ):
+            type_str = print_ast(type_condition)
+            self.report_error(
+                GraphQLError(
+                    f"Fragment cannot condition on non composite type '{type_str}'.",
+                    type_condition,
                 )
+            )
 
     def enter_fragment_definition(
         self, node: FragmentDefinitionNode, *_args: Any
@@ -64,8 +63,9 @@ class FragmentsOnCompositeTypesRule(ValidationRule):
         :meta private:
         """
         type_condition = node.type_condition
-        type_ = type_from_ast(self.context.schema, type_condition)
-        if type_ and not is_composite_type(type_):
+        if (
+            type_ := type_from_ast(self.context.schema, type_condition)
+        ) and not is_composite_type(type_):
             type_str = print_ast(type_condition)
             self.report_error(
                 GraphQLError(
